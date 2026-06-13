@@ -307,7 +307,7 @@ local Templates = {
         Title = "No Title",
         Footer = "No Footer",
         Position = UDim2.fromOffset(6, 6),
-        Size = UDim2.fromOffset(720, 600),
+        Size = UDim2.fromOffset(580, 460),
         IconSize = UDim2.fromOffset(30, 30),
         AutoShow = true,
         Center = true,
@@ -319,7 +319,10 @@ local Templates = {
         ShowCustomCursor = true,
         Font = Enum.Font.Code,
         ToggleKeybind = Enum.KeyCode.RightControl,
-        
+        GreenExecutors = {},
+        OrangeExecutors = {"xeno", "solara"},
+        RedExecutors = {"jjsploit"},
+
         ShowMobileButtons = true,
         MobileButtonsSide = "Left",
 
@@ -1007,7 +1010,7 @@ function Library:UpdateColorsUsingRegistry()
 end
 
 function Library:SetDPIScale(DPIScale: number)
-    Library.DPIScale = DPIScale / 100
+    Library.DPIScale = DPIScale / 70
     Library.MinSize = Library.OriginalMinSize * Library.DPIScale
 
 	for _, UIScale in Library.Scales do
@@ -1580,7 +1583,7 @@ function Library:AddDraggableLabel(Text: string)
         Parent = ScreenGui,
     })
     table.insert(
-        Library.Corners, 
+        Library.Corners,
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius),
             Parent = Label,
@@ -1627,7 +1630,7 @@ function Library:AddDraggableButton(Text: string, Func, ExcludeScaling: boolean?
         Parent = ScreenGui,
     })
     table.insert(
-        Library.Corners, 
+        Library.Corners,
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius),
             Parent = Button,
@@ -1648,7 +1651,7 @@ function Library:AddDraggableButton(Text: string, Func, ExcludeScaling: boolean?
         if not IsClickInput(Input) then
             return
         end
-        
+
         local Start = tick()
 
         local Changed
@@ -4394,7 +4397,7 @@ do
         else
             Box:GetPropertyChangedSignal("Text"):Connect(function()
                 if Box.Text == Input.Value then return end
-                
+
                 Input:SetValue(Box.Text)
             end)
         end
@@ -4414,7 +4417,7 @@ do
             Input:SetValue(Input.EmptyReset)
             Input.Default = Input.EmptyReset
         end
-        
+
         Options[Idx] = Input
 
         return Input
@@ -4950,7 +4953,7 @@ do
             end
 
             DisplayButton.Text = (Str == "" and "---" or Str)
-            
+
             if ValueImage then
                 DisplayImage.Image = ValueImage.Url
                 DisplayImage.ImageRectOffset = ValueImage.ImageRectOffset or Vector2.zero
@@ -5101,7 +5104,7 @@ do
         function Dropdown:SetValue(Value)
             if Info.Multi then
                 local Table = {}
-				
+
                 for Val, Active in Value or {} do
                     if typeof(Active) ~= "boolean" then
                         Table[Active] = true
@@ -5173,7 +5176,7 @@ do
             if typeof(ValueImages) ~= "table" then
                 return
             end
-            
+
             Dropdown.ValueImages = ValueImages
             Dropdown:BuildDropdownList()
         end
@@ -5182,11 +5185,11 @@ do
             if typeof(ValueImages) ~= "table" then
                 return
             end
-            
+
             for key, val in ValueImages do
                 Dropdown.ValueImages[key] = val
             end
-            
+
             Dropdown:BuildDropdownList()
         end
 
@@ -6104,6 +6107,98 @@ do
         return DepGroupbox
     end
 
+function Funcs:AddSection(Name, DefaultOpen)
+    local Groupbox = self
+    local Container = Groupbox.Container
+    local IsOpen = DefaultOpen ~= false
+
+    local SectionHolder = New("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Parent = Container,
+    })
+
+    local Header = New("TextButton", {
+        BackgroundColor3 = "MainColor",
+        Size = UDim2.new(1, 0, 0, 24),
+        Text = "",
+        Parent = SectionHolder,
+    })
+    New("UICorner", {
+        CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+        Parent = Header,
+    })
+    New("UIStroke", {
+        Color = "OutlineColor",
+        Parent = Header,
+    })
+
+    New("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(8, 0),
+        Size = UDim2.new(1, -30, 1, 0),
+        Text = Name,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = Header,
+    })
+
+local SectionArrowDownIcon = Library:GetIcon("arrow-big-down")
+local SectionArrowUpIcon = Library:GetIcon("arrow-big-up")
+local Arrow = New("ImageLabel", {
+    AnchorPoint = Vector2.new(1, 0.5),
+    BackgroundTransparency = 1,
+    Image = SectionArrowUpIcon and SectionArrowUpIcon.Url or "",
+    ImageColor3 = "FontColor",
+    ImageRectOffset = SectionArrowUpIcon and SectionArrowUpIcon.ImageRectOffset or Vector2.zero,
+    ImageRectSize = SectionArrowUpIcon and SectionArrowUpIcon.ImageRectSize or Vector2.zero,
+    Position = UDim2.new(1, -16, 0.5, 0),
+    Size = UDim2.fromOffset(14, 14),
+    Parent = Header,
+})
+
+    local ContentHolder = New("Frame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.fromScale(1, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Position = UDim2.fromOffset(0, 26),
+        Visible = IsOpen,
+        Parent = SectionHolder,
+    })
+    New("UIListLayout", {
+        Padding = UDim.new(0, 8),
+        Parent = ContentHolder,
+    })
+    New("UIPadding", {
+        PaddingTop = UDim.new(0, 4),
+        Parent = ContentHolder,
+    })
+
+    Header.MouseButton1Click:Connect(function()
+        IsOpen = not IsOpen
+        ContentHolder.Visible = IsOpen
+        Arrow.Image = IsOpen and (SectionArrowUpIcon and SectionArrowUpIcon.Url or "") or (SectionArrowDownIcon and SectionArrowDownIcon.Url or "")
+Arrow.ImageRectOffset = IsOpen and (SectionArrowUpIcon and SectionArrowUpIcon.ImageRectOffset or Vector2.zero) or (SectionArrowDownIcon and SectionArrowDownIcon.ImageRectOffset or Vector2.zero)
+Arrow.ImageRectSize = IsOpen and (SectionArrowUpIcon and SectionArrowUpIcon.ImageRectSize or Vector2.zero) or (SectionArrowDownIcon and SectionArrowDownIcon.ImageRectSize or Vector2.zero)
+        Groupbox:Resize()
+    end)
+
+    local Section = {
+        Container = ContentHolder,
+        DependencyBoxes = {},
+        Elements = {},
+        Tab = Groupbox.Tab,
+    }
+
+    function Section:Resize()
+        Groupbox:Resize()
+    end
+
+    setmetatable(Section, BaseGroupbox)
+    return Section
+end
+
     BaseGroupbox.__index = Funcs
     BaseGroupbox.__namecall = function(_, Key, ...)
         return Funcs[Key](...)
@@ -6207,7 +6302,7 @@ function Library:Notify(...)
         Size = UDim2.fromScale(1, 0),
         Parent = Holder,
     })
-    
+
     if Data.BigIcon then
         New("UIListLayout", {
             Padding = UDim.new(0, 8),
@@ -6243,7 +6338,7 @@ function Library:Notify(...)
         Padding = UDim.new(0, 4),
         Parent = TextContainer,
     })
-    
+
     local TitleContainer
     if Data.Title then
         TitleContainer = New("Frame", {
@@ -6470,7 +6565,7 @@ function Library:CreateWindow(WindowInfo)
         WindowInfo.Font = Font.fromEnum(WindowInfo.Font)
     end
     WindowInfo.CornerRadius = math.min(WindowInfo.CornerRadius, 20)
-    
+
     --// Old Naming \\--
     if WindowInfo.Compact ~= nil then
         WindowInfo.SidebarCompacted = WindowInfo.Compact
@@ -6793,6 +6888,7 @@ function Library:CreateWindow(WindowInfo)
         )
 
         --// Footer
+--// Footer
         FooterLabel = New("TextLabel", {
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(1, 1),
@@ -6802,6 +6898,160 @@ function Library:CreateWindow(WindowInfo)
             Parent = BottomBar,
         })
 
+local LocalVersion = "1.0.5"
+
+
+        -- Status Circle
+local StatusCircle = New("Frame", {
+            AnchorPoint = Vector2.new(0, 0.5),
+            BackgroundColor3 = Color3.fromRGB(0, 255, 100),
+            Position = UDim2.new(0, 8, 0.5, 0),
+            Size = UDim2.fromOffset(10, 10),
+            ZIndex = BottomBar.ZIndex + 1,
+            Parent = BottomBar,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = StatusCircle,
+        })
+
+        local StatusGlow = New("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundTransparency = 1,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(28, 28),
+            Image = "rbxasset://textures/ui/Animation/icon_radial_outline.png", -- soft round glow texture
+            ImageColor3 = Color3.fromRGB(0, 255, 100),
+            ImageTransparency = 0.5,
+            ZIndex = StatusCircle.ZIndex - 1,
+            Visible = false,
+            Parent = StatusCircle,
+        })
+
+local DownloadIcon = Library:GetIcon("download")
+
+local UpdateButton = New("ImageButton", {
+    AnchorPoint = Vector2.new(0, 0.5),
+    BackgroundTransparency = 1,
+    Position = UDim2.new(0, 24, 0.5, 0),
+    Size = UDim2.fromOffset(14, 14),
+    Image = DownloadIcon and DownloadIcon.Url or "",
+    ImageColor3 = Color3.fromRGB(100, 100, 100),
+    ImageRectOffset = DownloadIcon and DownloadIcon.ImageRectOffset or Vector2.zero,
+    ImageRectSize = DownloadIcon and DownloadIcon.ImageRectSize or Vector2.zero,
+    ZIndex = BottomBar.ZIndex + 1,
+    Parent = BottomBar,
+})
+
+local UpdateIcon = UpdateButton
+local LastNotifiedVersion
+
+UpdateButton.MouseButton1Click:Connect(function()
+    if UpdateIcon.ImageColor3 ~= Color3.fromRGB(0, 255, 100) then
+        return
+    end
+
+    Library:Unload()
+    loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/e8580ba6e94aeaa7aa2486f060167f85.lua"))()
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        local success, result = pcall(function()
+            return game:HttpGet("https://raw.githubusercontent.com/PollutedHub/Obsidianmodified/main/version.txt")
+        end)
+
+        if success and result then
+            local remoteVersion = result:gsub("%s+", "")
+
+            if remoteVersion == LocalVersion then
+                UpdateIcon.ImageColor3 = Color3.fromRGB(100, 100, 100)
+            else
+                UpdateIcon.ImageColor3 = Color3.fromRGB(0, 255, 100)
+
+                if LastNotifiedVersion ~= remoteVersion then
+                    LastNotifiedVersion = remoteVersion
+
+                    Library:Notify(
+                        "UI Update Found Version: " .. remoteVersion,
+                        10
+                    )
+                end
+            end
+        else
+            UpdateIcon.ImageColor3 = Color3.fromRGB(255, 50, 50)
+        end
+
+        task.wait(5)
+    end
+end)
+
+local ExecutorName = (identifyexecutor and identifyexecutor())
+            or (getexecutorname and getexecutorname())
+            or ""
+        ExecutorName = ExecutorName:lower()
+
+        local GreenExecutors = WindowInfo.GreenExecutors
+        local OrangeExecutors = WindowInfo.OrangeExecutors
+        local RedExecutors = WindowInfo.RedExecutors
+
+        local CircleColor = Color3.fromRGB(0, 255, 100)
+        local IsGreen = true
+
+        for _, Name in OrangeExecutors do
+            if ExecutorName:match(Name) then
+                CircleColor = Color3.fromRGB(255, 165, 0)
+                IsGreen = false
+                break
+            end
+        end
+        for _, Name in RedExecutors do
+            if ExecutorName:match(Name) then
+                CircleColor = Color3.fromRGB(255, 50, 50)
+                IsGreen = false
+                break
+            end
+        end
+        if IsGreen then
+            for _, Name in GreenExecutors do
+                if ExecutorName:match(Name) then
+                    CircleColor = Color3.fromRGB(0, 255, 100)
+                    IsGreen = true
+                    break
+                end
+            end
+        end
+
+        StatusCircle.BackgroundColor3 = CircleColor
+
+        if IsGreen then
+            StatusGlow.Visible = true
+            StatusGlow.ImageColor3 = CircleColor
+
+            task.spawn(function()
+                while StatusGlow and StatusGlow.Parent do
+                    TweenService:Create(StatusCircle, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                        Size = UDim2.fromOffset(13, 13),
+                        BackgroundTransparency = 0.2,
+                    }):Play()
+                    TweenService:Create(StatusGlow, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                        ImageTransparency = 0.1,
+                        Size = UDim2.fromOffset(34, 34),
+                    }):Play()
+                    task.wait(0.8)
+
+                    TweenService:Create(StatusCircle, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                        Size = UDim2.fromOffset(10, 10),
+                        BackgroundTransparency = 0,
+                    }):Play()
+                    TweenService:Create(StatusGlow, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                        ImageTransparency = 0.5,
+                        Size = UDim2.fromOffset(28, 28),
+                    }):Play()
+                    task.wait(0.8)
+                end
+            end)
+        end
         --// Resize Button
         if WindowInfo.Resizable then
             ResizeButton = New("TextButton", {
@@ -6879,7 +7129,7 @@ function Library:CreateWindow(WindowInfo)
     if WindowInfo.BackgroundImage then
         function Window:SetBackgroundImage(Image: string)
             assert(typeof(Image) == "string", "Expected string for Image got: " .. typeof(Image))
-    
+
             BackgroundImage.Image = Image
             WindowInfo.BackgroundImage = Image
         end
@@ -7377,11 +7627,11 @@ function Library:CreateWindow(WindowInfo)
             local GroupboxList
 
             do
-                GroupboxHolder = New("Frame", {
-                    BackgroundColor3 = "BackgroundColor",
-                    Size = UDim2.fromScale(1, 0),
-                    Parent = BoxHolder,
-                })
+GroupboxHolder = New("Frame", {
+    BackgroundColor3 = "BackgroundColor",
+    Size = UDim2.new(1, 0, 0, 34),
+    Parent = BoxHolder,
+})
                 table.insert(
                     Library.Corners,
                     New("UICorner", {
@@ -7424,24 +7674,67 @@ function Library:CreateWindow(WindowInfo)
                     Parent = GroupboxLabel,
                 })
 
-                GroupboxContainer = New("Frame", {
-                    BackgroundTransparency = 1,
-                    Position = UDim2.fromOffset(0, 35),
-                    Size = UDim2.new(1, 0, 1, -35),
-                    Parent = GroupboxHolder,
-                })
+local IsOpen = true
+
+local ArrowDownIcon = Library:GetIcon("arrow-big-down")
+local ArrowUpIcon = Library:GetIcon("arrow-big-up")
+local Arrow = New("ImageLabel", {
+    AnchorPoint = Vector2.new(1, 0.5),
+    BackgroundTransparency = 1,
+    Image = ArrowUpIcon and ArrowUpIcon.Url or "",
+    ImageColor3 = "FontColor",
+    ImageRectOffset = ArrowUpIcon and ArrowUpIcon.ImageRectOffset or Vector2.zero,
+    ImageRectSize = ArrowUpIcon and ArrowUpIcon.ImageRectSize or Vector2.zero,
+    Position = UDim2.new(1, -16, 0.5, 0),
+    Size = UDim2.fromOffset(14, 14),
+    ZIndex = GroupboxHolder.ZIndex + 1,
+    Parent = GroupboxLabel,
+})
+
+local CollapseButton = New("TextButton", {
+    BackgroundTransparency = 1,
+    Size = UDim2.fromScale(1, 1),
+    Text = "",
+    ZIndex = GroupboxHolder.ZIndex + 1,
+    Parent = GroupboxLabel,
+})
+
+
+
+GroupboxContainer = New("Frame", {
+    BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(0, 35),
+    Size = UDim2.new(1, 0, 1, -35),
+    Visible = false,
+    Parent = GroupboxHolder,
+})
 
                 GroupboxList = New("UIListLayout", {
                     Padding = UDim.new(0, 8),
                     Parent = GroupboxContainer,
                 })
-                New("UIPadding", {
+New("UIPadding", {
                     PaddingBottom = UDim.new(0, 7),
                     PaddingLeft = UDim.new(0, 7),
                     PaddingRight = UDim.new(0, 7),
                     PaddingTop = UDim.new(0, 7),
                     Parent = GroupboxContainer,
                 })
+
+CollapseButton.MouseButton1Click:Connect(function()
+                    IsOpen = not IsOpen
+                    GroupboxContainer.Visible = IsOpen
+                    Arrow.Image = IsOpen and (ArrowUpIcon and ArrowUpIcon.Url or "") or (ArrowDownIcon and ArrowDownIcon.Url or "")
+Arrow.ImageRectOffset = IsOpen and (ArrowUpIcon and ArrowUpIcon.ImageRectOffset or Vector2.zero) or (ArrowDownIcon and ArrowDownIcon.ImageRectOffset or Vector2.zero)
+Arrow.ImageRectSize = IsOpen and (ArrowUpIcon and ArrowUpIcon.ImageRectSize or Vector2.zero) or (ArrowDownIcon and ArrowDownIcon.ImageRectSize or Vector2.zero)
+                    task.defer(function()
+                        if IsOpen then
+                            GroupboxHolder.Size = UDim2.new(1, 0, 0, (GroupboxList.AbsoluteContentSize.Y / Library.DPIScale) + 49)
+                        else
+                            GroupboxHolder.Size = UDim2.new(1, 0, 0, 34)
+                        end
+                    end)
+                end)
             end
 
             local Groupbox = {
@@ -7454,14 +7747,33 @@ function Library:CreateWindow(WindowInfo)
                 Elements = {},
             }
 
-            function Groupbox:Resize()
-                GroupboxHolder.Size = UDim2.new(1, 0, 0, (GroupboxList.AbsoluteContentSize.Y / Library.DPIScale) + 49)
-            end
+function Groupbox:Resize()
+    if IsOpen then
+        GroupboxHolder.Size = UDim2.new(1, 0, 0, (GroupboxList.AbsoluteContentSize.Y / Library.DPIScale) + 49)
+    else
+        GroupboxHolder.Size = UDim2.new(1, 0, 0, 34)
+    end
+end
 
-            setmetatable(Groupbox, BaseGroupbox)
+GroupboxList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    if IsOpen and GroupboxContainer.Visible then
+        GroupboxHolder.Size = UDim2.new(1, 0, 0, (GroupboxList.AbsoluteContentSize.Y / Library.DPIScale) + 49)
+    end
+end)
 
-            Groupbox:Resize()
-            Tab.Groupboxes[Info.Name] = Groupbox
+
+                setmetatable(Groupbox, BaseGroupbox)
+
+task.defer(function()
+    pcall(function()
+        IsOpen = true
+        GroupboxContainer.Visible = true
+        Arrow.Text = "▲"
+        task.wait()
+        Groupbox:Resize()
+    end)
+end)
+                Tab.Groupboxes[Info.Name] = Groupbox
 
             return Groupbox
         end
@@ -7718,10 +8030,10 @@ function Library:CreateWindow(WindowInfo)
                 function Tab:UpdateCorners()
                     LeftCover.Visible = TabIndex ~= 1
                     RightCover.Visible = TabIndex ~= TotalButtons
-        
+
                     BottomCover.Position = UDim2.new(0, 0, 1, -WindowInfo.CornerRadius)
                     BottomCover.Size = UDim2.new(1, 0, 0, WindowInfo.CornerRadius)
-        
+
                     LeftCover.Size = UDim2.new(0, WindowInfo.CornerRadius, 1, 0)
                     RightCover.Size = UDim2.new(0, WindowInfo.CornerRadius, 1, 0)
                 end
@@ -8291,7 +8603,7 @@ function Library:CreateWindow(WindowInfo)
             PaddingBottom = UDim.new(0, 5),
             Parent = DialogContainer,
         })
-        
+
         local _Sep2 = New("Frame", {
             BackgroundColor3 = "OutlineColor",
             BackgroundTransparency = 0,
@@ -8381,7 +8693,7 @@ function Library:CreateWindow(WindowInfo)
             local CloseTween = TweenService:Create(DialogScale, Library.TweenInfo, { Scale = 0.95 })
             TweenService:Create(DialogOverlay, Library.TweenInfo, { BackgroundTransparency = 1 }):Play()
             CloseTween:Play()
-            
+
             task.delay(Library.TweenInfo.Time, function()
                 DialogOverlay:Destroy()
             end)
@@ -8425,11 +8737,11 @@ function Library:CreateWindow(WindowInfo)
                 ZIndex = 9002,
                 Parent = ButtonsHolder,
             })
-            
+
             local BtnColor = "MainColor"
             local BtnOutline = "OutlineColor"
             local Variant = ButtonInfo.Variant or "Primary"
-            
+
             if Variant == "Primary" then
                 BtnColor = "FontColor"
                 BtnOutline = "FontColor"
@@ -8457,9 +8769,9 @@ function Library:CreateWindow(WindowInfo)
             Library:AddOutline(TextBtn)
             table.insert(
                 Library.Corners,
-                New("UICorner", { 
-                    CornerRadius = UDim.new(0, Library.CornerRadius), 
-                    Parent = TextBtn 
+                New("UICorner", {
+                    CornerRadius = UDim.new(0, Library.CornerRadius),
+                    Parent = TextBtn
                 })
             )
 
@@ -8475,7 +8787,7 @@ function Library:CreateWindow(WindowInfo)
             elseif Variant == "Destructive" then
                 TextColor = Color3.new(1, 1, 1)
             end
-            
+
             local BtnLabel = New("TextLabel", {
                 BackgroundTransparency = 1,
                 Size = UDim2.fromScale(1, 1),
@@ -8486,7 +8798,7 @@ function Library:CreateWindow(WindowInfo)
                 ZIndex = 9002,
                 Parent = TextBtn,
             })
-            
+
             local LabelX, _ = Library:GetTextBounds(BtnLabel.Text, Library.Scheme.Font, 14, 250)
             ButtonContainer.Size = UDim2.fromOffset(LabelX + 30, 26)
             TextBtn.Size = UDim2.fromOffset(LabelX + 30, 26)
@@ -8503,9 +8815,9 @@ function Library:CreateWindow(WindowInfo)
                 })
                 table.insert(
                     Library.Corners,
-                    New("UICorner", { 
-                        CornerRadius = UDim.new(0, Library.CornerRadius), 
-                        Parent = ProgressBar 
+                    New("UICorner", {
+                        CornerRadius = UDim.new(0, Library.CornerRadius),
+                        Parent = ProgressBar
                     })
                 )
             end
@@ -8556,7 +8868,7 @@ function Library:CreateWindow(WindowInfo)
                 TweenService:Create(ProgressBar, TweenInfo.new(WaitTime, Enum.EasingStyle.Linear), {
                     Size = UDim2.new(1, 0, 0, 2)
                 }):Play()
-                
+
                 task.delay(WaitTime, function()
                     ButtonWrap:SetDisabled(false)
                     if ProgressBar then
@@ -8579,7 +8891,7 @@ function Library:CreateWindow(WindowInfo)
         Library.Dialogues[Idx] = Dialog
 
         Dialog:Resize()
-        
+
         Library.ActiveDialog = Dialog
         return Dialog
     end
@@ -8735,31 +9047,32 @@ function Library:CreateWindow(WindowInfo)
         task.spawn(Library.Toggle)
     end
 
-    if Library.IsMobile then
-        local ToggleButton = Library:AddDraggableButton("Toggle", function()
-            Library:Toggle()
-        end, true, true)
+   if Library.IsMobile then
+    local ToggleButton = Library:AddDraggableButton("", function()
+        Library:Toggle()
+    end, true, true)
 
-        local LockButton = Library:AddDraggableButton("Lock", function(self)
-            Library.CantDragForced = not Library.CantDragForced
-            self:SetText(Library.CantDragForced and "Unlock" or "Lock")
-        end, true, true)
+    ToggleButton.Button.Size = UDim2.fromOffset(40, 40)
+	ToggleButton.Button.BackgroundTransparency = 1
+    ToggleButton.Button.Text = ""
 
-        if WindowInfo.MobileButtonsSide == "Right" then
-            ToggleButton.Button.Position = UDim2.new(1, -6, 0, 6)
-            ToggleButton.Button.AnchorPoint = Vector2.new(1, 0)
+    local BgImage = Instance.new("ImageLabel")
+    BgImage.BackgroundTransparency = 1
+    BgImage.Size = UDim2.fromScale(1, 1)
+    BgImage.Image = "rbxassetid://133979285618025"
+    BgImage.ScaleType = Enum.ScaleType.Fit
+    BgImage.ZIndex = ToggleButton.Button.ZIndex - 1
+    BgImage.Parent = ToggleButton.Button
 
-            LockButton.Button.Position = UDim2.new(1, -6, 0, 46)
-            LockButton.Button.AnchorPoint = Vector2.new(1, 0)
-        else
-            LockButton.Button.Position = UDim2.fromOffset(6, 46)
-        end
-
-        if WindowInfo.ShowMobileButtons == false then
-            ToggleButton.Button.Visible = false
-            LockButton.Button.Visible = false
-        end
+    if WindowInfo.MobileButtonsSide == "Right" then
+        ToggleButton.Button.Position = UDim2.new(1, -6, 0, 6)
+        ToggleButton.Button.AnchorPoint = Vector2.new(1, 0)
     end
+
+    if WindowInfo.ShowMobileButtons == false then
+        ToggleButton.Button.Visible = false
+    end
+end
 
     --// Execution \\--
     SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
@@ -8851,7 +9164,7 @@ function Library:CreateLoading(LoadingInfo)
     })
     Library:AddOutline(MainFrame)
     table.insert(Library.Corners, New("UICorner", { CornerRadius = UDim.new(0, Library.CornerRadius), Parent = MainFrame }))
-    
+
 	local MainScale = New("UIScale", {
 		Scale = Library.IsMobile and 0.8 or 1,
 		Parent = MainFrame
@@ -8879,9 +9192,9 @@ function Library:CreateLoading(LoadingInfo)
     })
     local SidebarCorner = New("UICorner", { CornerRadius = UDim.new(0, Library.CornerRadius), Parent = SideBar })
     table.insert(Library.Corners, SidebarCorner)
-    
+
     Library:AddOutline(SideBar)
-    
+
     local SidebarDivider = New("Frame", {
         BackgroundColor3 = "OutlineColor",
         BorderSizePixel = 0,
@@ -9085,10 +9398,10 @@ function Library:CreateLoading(LoadingInfo)
         Elements = {},
         DependencyBoxes = {},
         Tabboxes = {},
-        
+
         BoxHolder = SidebarScrolling,
         Container = SidebarScrolling,
-        
+
         Resize = function(self)
             SidebarScrolling.CanvasSize = UDim2.fromOffset(0, SidebarList.AbsoluteContentSize.Y + 24)
         end,
@@ -9184,7 +9497,7 @@ function Library:CreateLoading(LoadingInfo)
         local ShowSidebar = Loading.ShowSidebar
         local FinalWidth = ShowSidebar and (Loading.ContentWidth + Loading.SidebarWidth) or Loading.WindowWidth
         local FinalHeight = Loading.IsError and Loading.WindowErrorHeight or Loading.WindowHeight
-        
+
         if ShowSidebar then
             SideBar.Visible = true
             SidebarDivider.Visible = true
@@ -9210,7 +9523,7 @@ function Library:CreateLoading(LoadingInfo)
             return
         end
 
-        local RequiredHeight = 
+        local RequiredHeight =
               49 -- TopBar
             + 48 -- Padding
             + InnerContent.UIListLayout.AbsoluteContentSize.Y
@@ -9347,8 +9660,8 @@ function Library:CreateLoading(LoadingInfo)
         assert(typeof(Buttons) == "table", "Buttons must be a table")
 
         for _, button in ErrorButtonsHolder:GetChildren() do
-            if button:IsA("Frame") then 
-                button:Destroy() 
+            if button:IsA("Frame") then
+                button:Destroy()
             end
         end
 
@@ -9362,11 +9675,11 @@ function Library:CreateLoading(LoadingInfo)
                 Size = UDim2.fromOffset(0, 26),
                 Parent = ErrorButtonsHolder,
             })
-            
+
             local BtnColor = "MainColor"
             local BtnOutline = "OutlineColor"
             local Variant = ButtonInfo.Variant or "Primary"
-            
+
             if Variant == "Primary" then
                 BtnColor = "FontColor"
                 BtnOutline = "FontColor"
@@ -9392,9 +9705,9 @@ function Library:CreateLoading(LoadingInfo)
             Library:AddOutline(TextBtn)
             table.insert(
                 Library.Corners,
-                New("UICorner", { 
-                    CornerRadius = UDim.new(0, Library.CornerRadius), 
-                    Parent = TextBtn 
+                New("UICorner", {
+                    CornerRadius = UDim.new(0, Library.CornerRadius),
+                    Parent = TextBtn
                 })
             )
 
@@ -9419,7 +9732,7 @@ function Library:CreateLoading(LoadingInfo)
                 TextSize = 14,
                 Parent = TextBtn,
             })
-            
+
             local LabelX, _ = Library:GetTextBounds(BtnLabel.Text, Library.Scheme.Font, 14, 250)
             ButtonContainer.Size = UDim2.fromOffset(LabelX + 30, 26)
             TextBtn.Size = UDim2.fromOffset(LabelX + 30, 26)
