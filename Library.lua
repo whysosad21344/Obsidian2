@@ -176,6 +176,7 @@ local Library = {
     Tabs = {},
     TabButtons = {},
     DependencyBoxes = {},
+    GroupboxDragTargets = {},
 
     KeybindFrame = nil,
     KeybindContainer = nil,
@@ -6702,7 +6703,17 @@ local function ReindexSide(Side)
         return TargetSide, InsertOrder
     end
 
-    local function SetupGroupboxDrag(BoxHolder, DragHandle, TabName, TabLeft, TabRight)
+
+    local function GetTabButtonDropTarget()
+        for _, Entry in Library.GroupboxDragTargets do
+            if Library:MouseIsOverFrame(Entry.Button, Mouse) then
+                return Entry
+            end
+        end
+        return nil
+    end
+
+local function SetupGroupboxDrag(BoxHolder, DragHandle, TabName, TabLeft, TabRight, GroupboxName)
         local DragStartPos = nil
         local IsDragging = false
         local DragThreshold = 6
@@ -6736,20 +6747,44 @@ local function ReindexSide(Side)
             if not DragStartPos then return end
 
             if IsDragging then
-                local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabLeft, TabRight)
-                local SourceSide = BoxHolder.Parent
+                local TabTarget = GetTabButtonDropTarget()
 
-                BoxHolder.LayoutOrder = InsertOrder
-                if SourceSide ~= TargetSide then
+                if TabTarget and TabTarget.TabName ~= TabName then
+                    --// Dropped onto a different tab's button -> move groupbox there
+                    local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabTarget.TabLeft, TabTarget.TabRight)
+                    local SourceSide = BoxHolder.Parent
+
+                    BoxHolder.LayoutOrder = InsertOrder
                     BoxHolder.Parent = TargetSide
-                end
 
-                ReindexSide(TargetSide)
-                if SourceSide ~= TargetSide then
+                    ReindexSide(TargetSide)
                     ReindexSide(SourceSide)
-                end
 
-                SaveGroupboxOrder(TabName, TabLeft, TabRight)
+                    local SourceTab = Library.Tabs[TabName]
+                    local DestTab = Library.Tabs[TabTarget.TabName]
+                    if SourceTab and DestTab and GroupboxName then
+                        DestTab.Groupboxes[GroupboxName] = SourceTab.Groupboxes[GroupboxName]
+                        SourceTab.Groupboxes[GroupboxName] = nil
+                    end
+
+                    SaveGroupboxOrder(TabName, TabLeft, TabRight)
+                    SaveGroupboxOrder(TabTarget.TabName, TabTarget.TabLeft, TabTarget.TabRight)
+                else
+                    local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabLeft, TabRight)
+                    local SourceSide = BoxHolder.Parent
+
+                    BoxHolder.LayoutOrder = InsertOrder
+                    if SourceSide ~= TargetSide then
+                        BoxHolder.Parent = TargetSide
+                    end
+
+                    ReindexSide(TargetSide)
+                    if SourceSide ~= TargetSide then
+                        ReindexSide(SourceSide)
+                    end
+
+                    SaveGroupboxOrder(TabName, TabLeft, TabRight)
+                end
             end
 
             IsDragging = false
@@ -6758,7 +6793,6 @@ local function ReindexSide(Side)
 
         return function() return IsDragging end
     end
-
     
 local TabOrderCounter = 0
         local DraggingTab = nil
@@ -7743,6 +7777,13 @@ local ExecutorName = (identifyexecutor and identifyexecutor())
             },
         }
 
+        table.insert(Library.GroupboxDragTargets, {
+            Button = TabButton,
+            TabLeft = TabLeft,
+            TabRight = TabRight,
+            TabName = Name,
+        })
+
         function Tab:UpdateWarningBox(Info)
             if typeof(Info.IsNormal) == "boolean" then
                 Tab.WarningBox.IsNormal = Info.IsNormal
@@ -7955,7 +7996,8 @@ local CollapseButton = New("TextButton", {
     Parent = GroupboxLabel,
 })
 
-local IsGroupboxDragging = SetupGroupboxDrag(BoxHolder, CollapseButton, Name, TabLeft, TabRight)
+local IsGroupboxDragging = SetupGroupboxDrag(BoxHolder, CollapseButton, Name, TabLeft, TabRight, Info.Name)
+
 
 
 
