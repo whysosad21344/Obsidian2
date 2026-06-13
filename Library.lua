@@ -6612,8 +6612,9 @@ local TabOrderCounter = 0
         local DraggingButton = nil
 
         local function SetupTabDrag(Button)
-            TabOrderCounter = TabOrderCounter + 1
-            Button.LayoutOrder = TabOrderCounter
+TabOrderCounter = TabOrderCounter + 1
+        Button.LayoutOrder = TabOrderCounter
+        Button.Name = "TabButton_" .. TabOrderCounter
 
             local DragStartY = nil
             local IsDragging = false
@@ -6668,12 +6669,36 @@ local TabOrderCounter = 0
                     IsDragging = false
                     DraggingButton = nil
                     DragStartY = nil
+                    SaveTabOrder()
                     return
                 end
                 DragStartY = nil
             end)
         end
 
+         local function SaveTabOrder()
+        if not writefile then return end
+        local Order = {}
+        for _, Button in Tabs:GetChildren() do
+            if Button:IsA("TextButton") then
+                Order[Button.Name] = Button.LayoutOrder
+            end
+        end
+        pcall(writefile, "ObsidianTabOrder.json", game:GetService("HttpService"):JSONEncode(Order))
+    end
+
+    local function LoadTabOrder()
+        if not readfile or not isfile then return end
+        local Success, Data = pcall(readfile, "ObsidianTabOrder.json")
+        if not Success or not Data then return end
+        local Success2, Order = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(Data)
+        end)
+        if not Success2 or not Order then return end
+        return Order
+    end
+
+    local SavedTabOrder = LoadTabOrder()
 
     do
         Library.KeybindFrame, Library.KeybindContainer = Library:AddDraggableMenu("Keybinds")
@@ -7346,6 +7371,10 @@ local ExecutorName = (identifyexecutor and identifyexecutor())
             })
 
             SetupTabDrag(TabButton)
+
+            if SavedTabOrder and SavedTabOrder[TabButton.Name] then
+                TabButton.LayoutOrder = SavedTabOrder[TabButton.Name]
+            end
 
             local ButtonPadding = New("UIPadding", {
                 PaddingBottom = UDim.new(0, IsCompact and 6 or 11),
@@ -8268,6 +8297,11 @@ end)
             })
 
             SetupTabDrag(TabButton)
+
+if SavedTabOrder and SavedTabOrder[TabButton.Name] then
+                TabButton.LayoutOrder = SavedTabOrder[TabButton.Name]
+            end
+
             local ButtonPadding = New("UIPadding", {
                 PaddingBottom = UDim.new(0, IsCompact and 6 or 11),
                 PaddingLeft = UDim.new(0, IsCompact and 6 or 12),
