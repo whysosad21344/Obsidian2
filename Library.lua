@@ -7897,7 +7897,13 @@ function Tab:AddGroupbox(Info)
                 Parent = Info.Side == 1 and TabLeft or TabRight,
             })
 
-local SavedEntry = SavedGroupboxOrder[Name] and SavedGroupboxOrder[Name][Info.Name]
+local SavedEntry = nil
+for _, TabData in SavedGroupboxOrder do
+    if TabData[Info.Name] then
+        SavedEntry = TabData[Info.Name]
+        break
+    end
+end
 if SavedEntry then
     task.defer(function()
         local destTabName = SavedEntry.Tab or Name
@@ -7916,7 +7922,6 @@ if SavedEntry then
         BoxHolder.LayoutOrder = SavedEntry.Order
     end)
 end
-
             New("UIListLayout", {
                 Padding = UDim.new(0, 6),
                 Parent = BoxHolder,
