@@ -6623,39 +6623,32 @@ local function SaveTabOrder()
     end
 
 local function SaveGroupboxOrder()
-        if not writefile then return end
+    if not writefile then return end
 
-        local AllOrder = {}
-        local ok, existing = pcall(readfile, "ObsidianGroupboxOrder.json")
-        if ok and existing then
-            local ok2, decoded = pcall(function()
-                return game:GetService("HttpService"):JSONDecode(existing)
-            end)
-            if ok2 and decoded then AllOrder = decoded end
-        end
+    local AllOrder = {}
 
-        for _, Entry in Library.GroupboxDragTargets do
-            for sideIdx, Side in ipairs({Entry.TabLeft, Entry.TabRight}) do
-                for _, Child in ipairs(Side:GetChildren()) do
-                    if Child:IsA("Frame") and Child.Name ~= "" then
-                        if not AllOrder[Entry.TabName] then
-                            AllOrder[Entry.TabName] = {}
-                        end
-                        AllOrder[Entry.TabName][Child.Name] = {
-                            Side = sideIdx,
-                            Order = Child.LayoutOrder,
-                            Tab = Entry.TabName,
-                        }
+    for _, Entry in Library.GroupboxDragTargets do
+        for sideIdx, Side in ipairs({Entry.TabLeft, Entry.TabRight}) do
+            for _, Child in ipairs(Side:GetChildren()) do
+                if Child:IsA("Frame") and Child.Name ~= "" then
+                    if not AllOrder[Entry.TabName] then
+                        AllOrder[Entry.TabName] = {}
                     end
+                    AllOrder[Entry.TabName][Child.Name] = {
+                        Side = sideIdx,
+                        Order = Child.LayoutOrder,
+                        Tab = Entry.TabName,
+                    }
                 end
             end
         end
-
-        local Success, Err = pcall(writefile, "ObsidianGroupboxOrder.json", game:GetService("HttpService"):JSONEncode(AllOrder))
-        if not Success then
-            warn("Failed to save groupbox order:", Err)
-        end
     end
+
+    local Success, Err = pcall(writefile, "ObsidianGroupboxOrder.json", game:GetService("HttpService"):JSONEncode(AllOrder))
+    if not Success then
+        warn("Failed to save groupbox order:", Err)
+    end
+end
 
     local function LoadGroupboxOrder()
         if not readfile or not isfile then return {} end
