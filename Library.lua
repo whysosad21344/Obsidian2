@@ -6628,7 +6628,7 @@ local TabOrderCounter = 0
                 IsDragging = false
             end)
 
-            Button.InputChanged:Connect(function(Input)
+           UserInputService.InputChanged:Connect(function(Input)
                 if (Input.UserInputType ~= Enum.UserInputType.MouseMovement
                     and Input.UserInputType ~= Enum.UserInputType.Touch)
                     or DragStartY == nil then
