@@ -6607,6 +6607,20 @@ function Library:CreateWindow(WindowInfo)
     local IsCompact = WindowInfo.SidebarCompacted
     local LastExpandedWidth = InitialLeftWidth
 
+local function SaveTabOrder()
+        if not writefile then return end
+        local Order = {}
+        for _, Button in Tabs:GetChildren() do
+            if Button:IsA("TextButton") and Button.Name ~= "" then
+                Order[Button.Name] = Button.LayoutOrder
+            end
+        end
+        local Success, Err = pcall(writefile, "ObsidianTabOrder.json", game:GetService("HttpService"):JSONEncode(Order))
+        if not Success then
+            warn("Failed to save tab order:", Err)
+        end
+    end
+
 local TabOrderCounter = 0
         local DraggingTab = nil
         local DraggingButton = nil
@@ -6676,16 +6690,7 @@ TabOrderCounter = TabOrderCounter + 1
             end)
         end
 
-         local function SaveTabOrder()
-        if not writefile then return end
-        local Order = {}
-        for _, Button in Tabs:GetChildren() do
-            if Button:IsA("TextButton") then
-                Order[Button.Name] = Button.LayoutOrder
-            end
-        end
-        pcall(writefile, "ObsidianTabOrder.json", game:GetService("HttpService"):JSONEncode(Order))
-    end
+
 
     local function LoadTabOrder()
         if not readfile or not isfile then return end
