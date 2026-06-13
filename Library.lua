@@ -6622,7 +6622,7 @@ local function SaveTabOrder()
         end
     end
 
-local function SaveGroupboxOrder(TabName, TabLeft, TabRight)
+local function SaveGroupboxOrder()
         if not writefile then return end
 
         local AllOrder = {}
@@ -6634,16 +6634,22 @@ local function SaveGroupboxOrder(TabName, TabLeft, TabRight)
             if ok2 and decoded then AllOrder = decoded end
         end
 
-        local TabOrder = {}
-        for sideIdx, Side in ipairs({TabLeft, TabRight}) do
-            for _, Child in ipairs(Side:GetChildren()) do
-                if Child:IsA("Frame") and Child.Name ~= "" then
-                    TabOrder[Child.Name] = { Side = sideIdx, Order = Child.LayoutOrder }
+        for _, Entry in Library.GroupboxDragTargets do
+            for sideIdx, Side in ipairs({Entry.TabLeft, Entry.TabRight}) do
+                for _, Child in ipairs(Side:GetChildren()) do
+                    if Child:IsA("Frame") and Child.Name ~= "" then
+                        if not AllOrder[Entry.TabName] then
+                            AllOrder[Entry.TabName] = {}
+                        end
+                        AllOrder[Entry.TabName][Child.Name] = {
+                            Side = sideIdx,
+                            Order = Child.LayoutOrder,
+                            Tab = Entry.TabName,
+                        }
+                    end
                 end
             end
         end
-
-        AllOrder[TabName] = TabOrder
 
         local Success, Err = pcall(writefile, "ObsidianGroupboxOrder.json", game:GetService("HttpService"):JSONEncode(AllOrder))
         if not Success then
@@ -6749,7 +6755,7 @@ local function SetupGroupboxDrag(BoxHolder, DragHandle, TabName, TabLeft, TabRig
             if IsDragging then
                 local TabTarget = GetTabButtonDropTarget()
 
-                if TabTarget and TabTarget.TabName ~= TabName then
+               if TabTarget and TabTarget.TabName ~= TabName then
                     --// Dropped onto a different tab's button -> move groupbox there
                     local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabTarget.TabLeft, TabTarget.TabRight)
                     local SourceSide = BoxHolder.Parent
@@ -6767,8 +6773,8 @@ local function SetupGroupboxDrag(BoxHolder, DragHandle, TabName, TabLeft, TabRig
                         SourceTab.Groupboxes[GroupboxName] = nil
                     end
 
-                    SaveGroupboxOrder(TabName, TabLeft, TabRight)
-                    SaveGroupboxOrder(TabTarget.TabName, TabTarget.TabLeft, TabTarget.TabRight)
+                    SaveGroupboxOrder()
+                    SaveGroupboxOrder()
                 else
                     local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabLeft, TabRight)
                     local SourceSide = BoxHolder.Parent
@@ -6783,7 +6789,7 @@ local function SetupGroupboxDrag(BoxHolder, DragHandle, TabName, TabLeft, TabRig
                         ReindexSide(SourceSide)
                     end
 
-                    SaveGroupboxOrder(TabName, TabLeft, TabRight)
+                    SaveGroupboxOrder()
                 end
             end
 
@@ -7898,14 +7904,25 @@ function Tab:AddGroupbox(Info)
                 Parent = Info.Side == 1 and TabLeft or TabRight,
             })
 
-            local SavedEntry = SavedGroupboxOrder[Name] and SavedGroupboxOrder[Name][Info.Name]
-            if SavedEntry then
-                local TargetSide = SavedEntry.Side == 2 and TabRight or TabLeft
-                if BoxHolder.Parent ~= TargetSide then
-                    BoxHolder.Parent = TargetSide
-                end
-                BoxHolder.LayoutOrder = SavedEntry.Order
+local SavedEntry = SavedGroupboxOrder[Name] and SavedGroupboxOrder[Name][Info.Name]
+if SavedEntry then
+    task.defer(function()
+        local destTabName = SavedEntry.Tab or Name
+        local TargetLeft, TargetRight = TabLeft, TabRight
+
+        for _, Entry in Library.GroupboxDragTargets do
+            if Entry.TabName == destTabName then
+                TargetLeft  = Entry.TabLeft
+                TargetRight = Entry.TabRight
+                break
             end
+        end
+
+        local TargetSide = SavedEntry.Side == 2 and TargetRight or TargetLeft
+        BoxHolder.Parent = TargetSide
+        BoxHolder.LayoutOrder = SavedEntry.Order
+    end)
+end
 
             New("UIListLayout", {
                 Padding = UDim.new(0, 6),
