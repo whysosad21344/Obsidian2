@@ -6621,6 +6621,145 @@ local function SaveTabOrder()
         end
     end
 
+local function SaveGroupboxOrder(TabName, TabLeft, TabRight)
+        if not writefile then return end
+
+        local AllOrder = {}
+        local ok, existing = pcall(readfile, "ObsidianGroupboxOrder.json")
+        if ok and existing then
+            local ok2, decoded = pcall(function()
+                return game:GetService("HttpService"):JSONDecode(existing)
+            end)
+            if ok2 and decoded then AllOrder = decoded end
+        end
+
+        local TabOrder = {}
+        for sideIdx, Side in ipairs({TabLeft, TabRight}) do
+            for _, Child in ipairs(Side:GetChildren()) do
+                if Child:IsA("Frame") and Child.Name ~= "" then
+                    TabOrder[Child.Name] = { Side = sideIdx, Order = Child.LayoutOrder }
+                end
+            end
+        end
+
+        AllOrder[TabName] = TabOrder
+
+        local Success, Err = pcall(writefile, "ObsidianGroupboxOrder.json", game:GetService("HttpService"):JSONEncode(AllOrder))
+        if not Success then
+            warn("Failed to save groupbox order:", Err)
+        end
+    end
+
+    local function LoadGroupboxOrder()
+        if not readfile or not isfile then return {} end
+
+        local ok, data = pcall(readfile, "ObsidianGroupboxOrder.json")
+        if not ok or not data then return {} end
+
+        local ok2, decoded = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(data)
+        end)
+
+        return (ok2 and decoded) or {}
+    end
+
+
+local function ReindexSide(Side)
+        local Children = {}
+        for _, Child in ipairs(Side:GetChildren()) do
+            if Child:IsA("Frame") and Child.Name ~= "" then
+                table.insert(Children, Child)
+            end
+        end
+        table.sort(Children, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+        for i, Child in ipairs(Children) do
+            Child.LayoutOrder = i
+        end
+    end
+
+    local function GetGroupboxDropTarget(BoxHolder, TabLeft, TabRight)
+        local TargetSide
+        if Mouse.X < TabLeft.AbsolutePosition.X + TabLeft.AbsoluteSize.X then
+            TargetSide = TabLeft
+        else
+            TargetSide = TabRight
+        end
+
+        local InsertOrder = 0
+        for _, Child in ipairs(TargetSide:GetChildren()) do
+            if Child:IsA("Frame") and Child.Name ~= "" and Child ~= BoxHolder then
+                local AbsPos, AbsSize = Child.AbsolutePosition, Child.AbsoluteSize
+                local MidY = AbsPos.Y + AbsSize.Y / 2
+                if Mouse.Y < MidY then
+                    InsertOrder = Child.LayoutOrder - 0.5
+                    return TargetSide, InsertOrder
+                else
+                    InsertOrder = Child.LayoutOrder + 0.5
+                end
+            end
+        end
+
+        return TargetSide, InsertOrder
+    end
+
+    local function SetupGroupboxDrag(BoxHolder, DragHandle, TabName, TabLeft, TabRight)
+        local DragStartPos = nil
+        local IsDragging = false
+        local DragThreshold = 6
+
+        DragHandle.InputBegan:Connect(function(Input)
+            if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and Input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            DragStartPos = Input.Position
+            IsDragging = false
+        end)
+
+        UserInputService.InputChanged:Connect(function(Input)
+            if (Input.UserInputType ~= Enum.UserInputType.MouseMovement
+                and Input.UserInputType ~= Enum.UserInputType.Touch)
+                or not DragStartPos then
+                return
+            end
+
+            if not IsDragging and (Input.Position - DragStartPos).Magnitude >= DragThreshold then
+                IsDragging = true
+            end
+        end)
+
+        DragHandle.InputEnded:Connect(function(Input)
+            if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and Input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            if not DragStartPos then return end
+
+            if IsDragging then
+                local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabLeft, TabRight)
+                local SourceSide = BoxHolder.Parent
+
+                BoxHolder.LayoutOrder = InsertOrder
+                if SourceSide ~= TargetSide then
+                    BoxHolder.Parent = TargetSide
+                end
+
+                ReindexSide(TargetSide)
+                if SourceSide ~= TargetSide then
+                    ReindexSide(SourceSide)
+                end
+
+                SaveGroupboxOrder(TabName, TabLeft, TabRight)
+            end
+
+            IsDragging = false
+            DragStartPos = nil
+        end)
+
+        return function() return IsDragging end
+    end
+
+    
 local TabOrderCounter = 0
         local DraggingTab = nil
         local DraggingButton = nil
@@ -6704,7 +6843,7 @@ TabOrderCounter = TabOrderCounter + 1
     end
 
     local SavedTabOrder = LoadTabOrder()
-
+local SavedGroupboxOrder = LoadGroupboxOrder()
     do
         Library.KeybindFrame, Library.KeybindContainer = Library:AddDraggableMenu("Keybinds")
         Library.KeybindFrame.AnchorPoint = Vector2.new(0, 0.5)
@@ -7709,13 +7848,24 @@ local ExecutorName = (identifyexecutor and identifyexecutor())
             Tab:RefreshSides()
         end
 
-        function Tab:AddGroupbox(Info)
+function Tab:AddGroupbox(Info)
             local BoxHolder = New("Frame", {
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1,
+                Name = Info.Name,
                 Size = UDim2.fromScale(1, 0),
                 Parent = Info.Side == 1 and TabLeft or TabRight,
             })
+
+            local SavedEntry = SavedGroupboxOrder[Name] and SavedGroupboxOrder[Name][Info.Name]
+            if SavedEntry then
+                local TargetSide = SavedEntry.Side == 2 and TabRight or TabLeft
+                if BoxHolder.Parent ~= TargetSide then
+                    BoxHolder.Parent = TargetSide
+                end
+                BoxHolder.LayoutOrder = SavedEntry.Order
+            end
+
             New("UIListLayout", {
                 Padding = UDim.new(0, 6),
                 Parent = BoxHolder,
@@ -7805,6 +7955,8 @@ local CollapseButton = New("TextButton", {
     Parent = GroupboxLabel,
 })
 
+local IsGroupboxDragging = SetupGroupboxDrag(BoxHolder, CollapseButton, Name, TabLeft, TabRight)
+
 
 
 GroupboxContainer = New("Frame", {
@@ -7828,6 +7980,8 @@ New("UIPadding", {
                 })
 
 CollapseButton.MouseButton1Click:Connect(function()
+                    if IsGroupboxDragging() then return end
+
                     IsOpen = not IsOpen
                     GroupboxContainer.Visible = IsOpen
                     Arrow.Image = IsOpen and (ArrowUpIcon and ArrowUpIcon.Url or "") or (ArrowDownIcon and ArrowDownIcon.Url or "")
