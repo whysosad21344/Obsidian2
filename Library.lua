@@ -1202,7 +1202,13 @@ ParentUI(ScreenGui)
 Library.ScreenGui = ScreenGui
 
 ScreenGui.DescendantRemoving:Connect(function(Instance)
-    Library:RemoveFromRegistry(Instance)
+    task.defer(function()
+        if Instance and Instance.Parent then
+            return
+        end
+
+        Library:RemoveFromRegistry(Instance)
+    end)
 end)
 
 local ModalElement = New("TextButton", {
@@ -1630,6 +1636,7 @@ function Library:AddDraggableButton(Text: string, Func, ExcludeScaling: boolean?
         ZIndex = 10,
         Parent = ScreenGui,
     })
+
     table.insert(
         Library.Corners,
         New("UICorner", {
@@ -1637,6 +1644,7 @@ function Library:AddDraggableButton(Text: string, Func, ExcludeScaling: boolean?
             Parent = Button,
         })
     )
+
     if not ExcludeScaling then
         table.insert(
             Library.Scales,
@@ -1645,33 +1653,85 @@ function Library:AddDraggableButton(Text: string, Func, ExcludeScaling: boolean?
             })
         )
     end
+
     Library:AddOutline(Button)
 
     local DragThreshold = if ExcludeDragging then 0.25 else math.huge
+    local TouchHoldThread = nil
+    local TouchCancelled = false
+    local DragAllowed = false
+
+    -- Minimum pixel movement before considering it a scroll/swipe attempt
+    local ScrollThreshold = 8
+
     Button.InputBegan:Connect(function(Input: InputObject)
         if not IsClickInput(Input) then
             return
         end
 
-        local Start = tick()
+        local StartTime = tick()
+        local StartPos = Input.Position
+        local IsTouch = (Input.UserInputType == Enum.UserInputType.Touch)
 
-        local Changed
-        Changed = Input.Changed:Connect(function()
+        local ChangedConnection
+        local MovedConnection
+
+        local function CleanupConnections()
+            TouchCancelled = true
+            if TouchHoldThread then
+                task.cancel(TouchHoldThread)
+                TouchHoldThread = nil
+            end
+            if ChangedConnection then
+                ChangedConnection:Disconnect()
+                ChangedConnection = nil
+            end
+            if MovedConnection then
+                MovedConnection:Disconnect()
+                MovedConnection = nil
+            end
+        end
+
+                if (Library.IsMobile or IsTouch) and not ExcludeDragging then
+            DragAllowed = false
+            TouchCancelled = false
+
+            -- Cancel drag timer if finger moves before 3s (user is scrolling)
+            MovedConnection = Input.Changed:Connect(function()
+                if Input.UserInputState == Enum.UserInputState.Change then
+                    local Distance = (Input.Position - StartPos).Magnitude
+                    if Distance > ScrollThreshold and not DragAllowed then
+                        CleanupConnections()
+                    end
+                end
+            end)
+
+            -- Require finger to stay stationary for 3 seconds before picking up tab
+            TouchHoldThread = task.delay(3, function()
+                if not TouchCancelled then
+                    DragAllowed = true
+                end
+            end)
+        else
+            -- ExcludeDragging (or not mobile/touch): no hold-to-drag story here,
+            -- so DragAllowed must stay false — click detection is purely time-based.
+            DragAllowed = false
+        end
+
+        ChangedConnection = Input.Changed:Connect(function()
             if Input.UserInputState ~= Enum.UserInputState.End then
                 return
             end
 
-            local IsLikelyDragging = tick() - Start > DragThreshold
+            local IsLikelyDragging = (tick() - StartTime > DragThreshold) or DragAllowed
+
+            CleanupConnections()
+
             if IsLikelyDragging then
                 return
             end
 
             Library:SafeCallback(Func, Table)
-
-            if Changed and Changed.Connected then
-                Changed:Disconnect()
-                Changed = nil
-            end
         end)
     end)
 
@@ -2087,17 +2147,31 @@ function Library:OnUnload(Callback)
 end
 
 function Library:Unload()
+
+    -- Turn off every active toggle first
+    for Idx, Toggle in pairs(Toggles) do
+        if Toggle and Toggle.Value then
+            pcall(function()
+                Toggle:SetValue(false)
+            end)
+        end
+    end
+
+    -- Disconnect library connections
     for Index = #Library.Signals, 1, -1 do
         local Connection = table.remove(Library.Signals, Index)
+
         if Connection and Connection.Connected then
             Connection:Disconnect()
         end
     end
 
+    -- Run unload callbacks
     for _, Callback in Library.UnloadSignals do
         Library:SafeCallback(Callback)
     end
 
+    -- Destroy tooltips
     for _, Tooltip in Tooltips do
         Library:SafeCallback(Tooltip.Destroy, Tooltip)
     end
@@ -4115,32 +4189,38 @@ do
             Switch.BackgroundColor3 = Toggle.Value and Library.Scheme.AccentColor or Library.Scheme.MainColor
             SwitchStroke.Color = Toggle.Value and Library.Scheme.AccentColor or Library.Scheme.OutlineColor
 
-            Library.Registry[Switch].BackgroundColor3 = Toggle.Value and "AccentColor" or "MainColor"
-            Library.Registry[SwitchStroke].Color = Toggle.Value and "AccentColor" or "OutlineColor"
+            if Library.Registry[Switch] then
+    Library.Registry[Switch].BackgroundColor3 = Toggle.Value and "AccentColor" or "MainColor"
+end
+            if Library.Registry[SwitchStroke] then
+    Library.Registry[SwitchStroke].Color = Toggle.Value and "AccentColor" or "OutlineColor"
+end
 
             if Toggle.Disabled then
                 Label.TextTransparency = 0.8
                 Ball.AnchorPoint = Vector2.new(Offset, 0)
                 Ball.Position = UDim2.fromScale(Offset, 0)
 
-                Ball.BackgroundColor3 = Library:GetDarkerColor(Library.Scheme.FontColor)
-                Library.Registry[Ball].BackgroundColor3 = function()
-                    return Library:GetDarkerColor(Library.Scheme.FontColor)
-                end
+Ball.BackgroundColor3 = Library:GetDarkerColor(Library.Scheme.FontColor)
+
+Library.Registry[Ball] = Library.Registry[Ball] or {}
+Library.Registry[Ball].BackgroundColor3 = function()
+    return Library:GetDarkerColor(Library.Scheme.FontColor)
+end
 
                 return
             end
 
-            TweenService:Create(Label, Library.TweenInfo, {
-                TextTransparency = Toggle.Value and 0 or 0.4,
-            }):Play()
-            TweenService:Create(Ball, Library.TweenInfo, {
-                AnchorPoint = Vector2.new(Offset, 0),
-                Position = UDim2.fromScale(Offset, 0),
-            }):Play()
+TweenService:Create(Label, Library.TweenInfo, {
+    TextTransparency = Toggle.Value and 0 or 0.4,
+}):Play()
+Ball.AnchorPoint = Vector2.new(Offset, 0)
+Ball.Position = UDim2.fromScale(Offset, 0)
 
-            Ball.BackgroundColor3 = Library.Scheme.FontColor
-            Library.Registry[Ball].BackgroundColor3 = "FontColor"
+Ball.BackgroundColor3 = Library.Scheme.FontColor
+
+Library.Registry[Ball] = Library.Registry[Ball] or {}
+Library.Registry[Ball].BackgroundColor3 = "FontColor"
         end
 
         function Toggle:OnChanged(Func)
@@ -6713,155 +6793,988 @@ local function ReindexSide(Side)
     end
 
 local function SetupGroupboxDrag(BoxHolder, DragHandle, TabName, TabLeft, TabRight, GroupboxName)
-        local DragStartPos = nil
-        local IsDragging = false
-        local DragThreshold = 6
+    local DragStartPos = nil
+    local IsDragging = false
+    local DragThreshold = 6
 
-        DragHandle.InputBegan:Connect(function(Input)
-            if Input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and Input.UserInputType ~= Enum.UserInputType.Touch then
-                return
+    local GhostClone = nil
+    local DropLine = nil
+
+    local function CleanupGroupboxDrag()
+        if GhostClone then
+            GhostClone:Destroy()
+            GhostClone = nil
+        end
+        if DropLine then
+            DropLine:Destroy()
+            DropLine = nil
+        end
+        BoxHolder.BackgroundTransparency = 1
+    end
+
+    local function CreateGroupboxGhost()
+        GhostClone = New("Frame", {
+            BackgroundColor3 = Library.Scheme.MainColor,
+            Size = UDim2.fromOffset(BoxHolder.AbsoluteSize.X, BoxHolder.AbsoluteSize.Y),
+            Position = UDim2.fromOffset(BoxHolder.AbsolutePosition.X, BoxHolder.AbsolutePosition.Y),
+            ZIndex = 999,
+            Parent = ScreenGui,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(0, Library.CornerRadius),
+            Parent = GhostClone,
+        })
+        New("UIStroke", {
+            Color = Library.Scheme.AccentColor,
+            Thickness = 1,
+            Parent = GhostClone,
+        })
+        -- Show the groupbox name label in the ghost
+        local nameLabel = BoxHolder:FindFirstChild(GroupboxName, true)
+        local labelText = GroupboxName or ""
+        New("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(12, 0),
+            Size = UDim2.new(1, -12, 0, 34),
+            Text = labelText,
+            TextColor3 = Library.Scheme.FontColor,
+            TextSize = 15,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 1000,
+            Parent = GhostClone,
+        })
+        GhostClone.BackgroundTransparency = 0.3
+    end
+
+    local function CreateGroupboxDropLine(yPos, xPos, width)
+        if DropLine then
+            DropLine:Destroy()
+        end
+        DropLine = New("Frame", {
+            BackgroundColor3 = Library.Scheme.AccentColor,
+            Position = UDim2.fromOffset(xPos, yPos - 1),
+            Size = UDim2.fromOffset(width, 2),
+            ZIndex = 998,
+            Parent = ScreenGui,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = DropLine,
+        })
+    end
+
+    local function GetSortedSideChildren(side)
+        local children = {}
+        for _, child in ipairs(side:GetChildren()) do
+            if child:IsA("Frame") and child.Name ~= "" and child ~= BoxHolder then
+                table.insert(children, child)
             end
-            DragStartPos = Input.Position
-            IsDragging = false
+        end
+        table.sort(children, function(a, b)
+            return a.LayoutOrder < b.LayoutOrder
         end)
+        return children
+    end
 
-        UserInputService.InputChanged:Connect(function(Input)
-            if (Input.UserInputType ~= Enum.UserInputType.MouseMovement
-                and Input.UserInputType ~= Enum.UserInputType.Touch)
-                or not DragStartPos then
+    local function GetCurrentTabContext()
+        local ParentSide = BoxHolder.Parent
+        for _, Entry in Library.GroupboxDragTargets do
+            if Entry.TabLeft == ParentSide or Entry.TabRight == ParentSide then
+                return Entry.TabName, Entry.TabLeft, Entry.TabRight
+            end
+        end
+        return TabName, TabLeft, TabRight
+    end
+
+    DragHandle.InputBegan:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and Input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        DragStartPos = Input.Position
+        IsDragging = false
+    end)
+
+    UserInputService.InputChanged:Connect(function(Input)
+        if (Input.UserInputType ~= Enum.UserInputType.MouseMovement
+            and Input.UserInputType ~= Enum.UserInputType.Touch)
+            or not DragStartPos then
+            return
+        end
+
+        if not IsDragging then
+            local Delta = (Input.Position - DragStartPos).Magnitude
+            if Delta < DragThreshold then
                 return
             end
+            IsDragging = true
+            BoxHolder.BackgroundTransparency = 0.7
+            CreateGroupboxGhost()
+        end
 
-            if not IsDragging and (Input.Position - DragStartPos).Magnitude >= DragThreshold then
-                IsDragging = true
-            end
-        end)
+        local MouseX = Mouse.X
+        local MouseY = Mouse.Y
 
-        DragHandle.InputEnded:Connect(function(Input)
-            if Input.UserInputType ~= Enum.UserInputType.MouseButton1
-                and Input.UserInputType ~= Enum.UserInputType.Touch then
-                return
-            end
-            if not DragStartPos then return end
+        -- Move ghost with mouse, but keep it inside the main UI
+        -- (or inside a torn-off window if the mouse is over one)
+        if GhostClone then
+            local MouseVec = Vector2.new(MouseX, MouseY)
+            local BoundsFrame = MainFrame
 
-            if IsDragging then
-                local TabTarget = GetTabButtonDropTarget()
-
-               if TabTarget and TabTarget.TabName ~= TabName then
-                    --// Dropped onto a different tab's button -> move groupbox there
-                    local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabTarget.TabLeft, TabTarget.TabRight)
-                    local SourceSide = BoxHolder.Parent
-
-                    BoxHolder.LayoutOrder = InsertOrder
-                    BoxHolder.Parent = TargetSide
-
-                    ReindexSide(TargetSide)
-                    ReindexSide(SourceSide)
-
-                    local SourceTab = Library.Tabs[TabName]
-                    local DestTab = Library.Tabs[TabTarget.TabName]
-                    if SourceTab and DestTab and GroupboxName then
-                        DestTab.Groupboxes[GroupboxName] = SourceTab.Groupboxes[GroupboxName]
-                        SourceTab.Groupboxes[GroupboxName] = nil
+            if not Library:MouseIsOverFrame(MainFrame, MouseVec) then
+                for _, Entry in Library.GroupboxDragTargets do
+                    local B = Entry.Button
+                    if B and B.Parent
+                        and B.Name:find("TearOffMain_", 1, true)
+                        and Library:MouseIsOverFrame(B, MouseVec) then
+                        BoundsFrame = B
+                        break
                     end
-
-                    SaveGroupboxOrder()
-                    SaveGroupboxOrder()
-                else
-                    local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabLeft, TabRight)
-                    local SourceSide = BoxHolder.Parent
-
-                    BoxHolder.LayoutOrder = InsertOrder
-                    if SourceSide ~= TargetSide then
-                        BoxHolder.Parent = TargetSide
-                    end
-
-                    ReindexSide(TargetSide)
-                    if SourceSide ~= TargetSide then
-                        ReindexSide(SourceSide)
-                    end
-
-                    SaveGroupboxOrder()
                 end
             end
 
-            IsDragging = false
-            DragStartPos = nil
+            local GhostSize = GhostClone.AbsoluteSize
+            local MinX = BoundsFrame.AbsolutePosition.X
+            local MinY = BoundsFrame.AbsolutePosition.Y
+            local MaxX = MinX + BoundsFrame.AbsoluteSize.X - GhostSize.X
+            local MaxY = MinY + BoundsFrame.AbsoluteSize.Y - GhostSize.Y
+
+            local GhostX = math.clamp(MouseX - GhostSize.X / 2, MinX, math.max(MinX, MaxX))
+            local GhostY = math.clamp(MouseY - 17, MinY, math.max(MinY, MaxY))
+
+            GhostClone.Position = UDim2.fromOffset(GhostX, GhostY)
+        end
+
+        -- Determine which side the mouse is over (based on the groupbox's CURRENT tab)
+        local _, CurrentTabLeft, CurrentTabRight = GetCurrentTabContext()
+
+        local ActiveSide = CurrentTabLeft
+        if Library:MouseIsOverFrame(CurrentTabRight, Vector2.new(MouseX, MouseY)) then
+            ActiveSide = CurrentTabRight
+        elseif Library:MouseIsOverFrame(CurrentTabLeft, Vector2.new(MouseX, MouseY)) then
+            ActiveSide = CurrentTabLeft
+        end
+
+        local OtherBoxes = GetSortedSideChildren(ActiveSide)
+        local sideAbsPos = ActiveSide.AbsolutePosition
+        local sideAbsSize = ActiveSide.AbsoluteSize
+
+        if #OtherBoxes == 0 then
+            -- Drop line at top of the side
+            CreateGroupboxDropLine(
+                sideAbsPos.Y + 4,
+                sideAbsPos.X + 2,
+                sideAbsSize.X - 4
+            )
+        elseif MouseY < OtherBoxes[1].AbsolutePosition.Y + OtherBoxes[1].AbsoluteSize.Y / 2 then
+            -- Above all
+            local b = OtherBoxes[1]
+            CreateGroupboxDropLine(
+                b.AbsolutePosition.Y,
+                b.AbsolutePosition.X,
+                b.AbsoluteSize.X
+            )
+        elseif MouseY >= OtherBoxes[#OtherBoxes].AbsolutePosition.Y + OtherBoxes[#OtherBoxes].AbsoluteSize.Y / 2 then
+            -- Below all
+            local b = OtherBoxes[#OtherBoxes]
+            CreateGroupboxDropLine(
+                b.AbsolutePosition.Y + b.AbsoluteSize.Y,
+                b.AbsolutePosition.X,
+                b.AbsoluteSize.X
+            )
+        else
+            -- Between two boxes
+            for i = 1, #OtherBoxes - 1 do
+                local thisB = OtherBoxes[i]
+                local nextB = OtherBoxes[i + 1]
+                local thisMid = thisB.AbsolutePosition.Y + thisB.AbsoluteSize.Y / 2
+                local nextMid = nextB.AbsolutePosition.Y + nextB.AbsoluteSize.Y / 2
+                if MouseY >= thisMid and MouseY < nextMid then
+                    CreateGroupboxDropLine(
+                        nextB.AbsolutePosition.Y,
+                        nextB.AbsolutePosition.X,
+                        nextB.AbsoluteSize.X
+                    )
+                    break
+                end
+            end
+        end
+    end)
+
+    DragHandle.InputEnded:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and Input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        if not DragStartPos then return end
+
+        if IsDragging then
+            CleanupGroupboxDrag()
+
+            local CurrentTabName, CurrentTabLeft, CurrentTabRight = GetCurrentTabContext()
+            local TabTarget = GetTabButtonDropTarget()
+
+            if TabTarget and TabTarget.TabName ~= CurrentTabName then
+                -- Dropped onto a different tab button -> move groupbox there
+                local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, TabTarget.TabLeft, TabTarget.TabRight)
+                local SourceSide = BoxHolder.Parent
+
+                BoxHolder.LayoutOrder = InsertOrder
+                BoxHolder.Parent = TargetSide
+
+                ReindexSide(TargetSide)
+                ReindexSide(SourceSide)
+
+                local SourceTab = Library.Tabs[CurrentTabName]
+                local DestTab = Library.Tabs[TabTarget.TabName]
+                if SourceTab and DestTab and GroupboxName then
+                    DestTab.Groupboxes[GroupboxName] = SourceTab.Groupboxes[GroupboxName]
+                    SourceTab.Groupboxes[GroupboxName] = nil
+                end
+
+                SaveGroupboxOrder()
+            else
+                local TargetSide, InsertOrder = GetGroupboxDropTarget(BoxHolder, CurrentTabLeft, CurrentTabRight)
+                local SourceSide = BoxHolder.Parent
+
+                BoxHolder.LayoutOrder = InsertOrder
+                if SourceSide ~= TargetSide then
+                    BoxHolder.Parent = TargetSide
+                end
+
+                ReindexSide(TargetSide)
+                if SourceSide ~= TargetSide then
+                    ReindexSide(SourceSide)
+                end
+
+                SaveGroupboxOrder()
+            end
+        end
+        IsDragging = false
+        DragStartPos = nil
+    end)
+
+    return function() return IsDragging end
+end
+
+    -- Tear-off tab system
+    local TornOffTabs = {}
+
+    local function DockTab(TabName)
+        local torn = TornOffTabs[TabName]
+        if not torn then return end
+for _, Entry in Library.GroupboxDragTargets do
+    if Entry.TabName == TabName then
+        Entry.Button = torn.Button
+        break
+    end
+end
+        -- Move the TabContainer back into the main Container
+        torn.TabContainer.Parent = Container
+        torn.TabContainer.Size = UDim2.fromScale(1, 1)
+        torn.TabContainer.Position = UDim2.fromScale(0, 0)
+
+        -- Restore the tab button in the sidebar
+        torn.Button.Visible = true
+        torn.Button.BackgroundTransparency = 1
+
+-- Only show the docked tab if there is no active tab.
+-- Otherwise keep the current tab visible and hide this one.
+if Library.ActiveTab == nil then
+    torn.Tab:Show()
+else
+    torn.TabContainer.Visible = false
+end
+
+        -- Destroy the floating window
+        if torn.FloatGui and torn.FloatGui.Parent then
+            torn.FloatGui:Destroy()
+        end
+
+        TornOffTabs[TabName] = nil
+    end
+
+    local function TearOffTab(Button, Tab, TabName, TabContainer)
+        -- Don't tear off if already torn
+        if TornOffTabs[TabName] then return end
+        -- Don't tear off key tabs
+        if Tab.IsKeyTab then return end
+
+-- Only hide the tab if it was actually the active tab
+if Library.ActiveTab == Tab then
+    Library.ActiveTab = nil
+    Tab:Hide()
+end
+
+        -- Remove button from sidebar entirely
+        Button.Visible = false
+
+        -- Create the floating ScreenGui
+        local FloatGui = Instance.new("ScreenGui")
+        FloatGui.Name = "ObsidianTearOff_" .. TabName
+        FloatGui.DisplayOrder = 997
+        FloatGui.ResetOnSpawn = false
+        pcall(protectgui, FloatGui)
+        pcall(function()
+            FloatGui.Parent = gethui()
+        end)
+        if not FloatGui.Parent then
+            FloatGui.Parent = LocalPlayer:WaitForChild("PlayerGui", math.huge)
+        end
+
+        -- Floating window frame — same styling as MainFrame
+        local mousePos = UserInputService:GetMouseLocation()
+local FloatFrame = New("TextButton", {
+    BackgroundColor3 = function()
+        return Library:GetBetterColor(Library.Scheme.BackgroundColor, -1)
+    end,
+    Name = "TearOffMain_" .. TabName,
+    Text = "",
+    AutoButtonColor = false,
+    Position = UDim2.fromOffset(
+        math.clamp(mousePos.X - 290, 6, workspace.CurrentCamera.ViewportSize.X - 586),
+        math.clamp(mousePos.Y - 24, 6, workspace.CurrentCamera.ViewportSize.Y - 406)
+    ),
+    Size = UDim2.fromOffset(580, 400),
+    ClipsDescendants = true,
+    Parent = FloatGui,
+})
+        table.insert(Library.Corners, New("UICorner", {
+            CornerRadius = UDim.new(0, Library.CornerRadius),
+            Parent = FloatFrame,
+        }))
+        table.insert(Library.Scales, New("UIScale", {
+            Parent = FloatFrame,
+        }))
+        Library:AddOutline(FloatFrame)
+
+        -- Title bar
+        local FloatTopBar = New("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 48),
+            Parent = FloatFrame,
+        })
+
+local FloatTitleLine = Library:MakeLine(FloatFrame, {
+    Position = UDim2.fromOffset(0, 48),
+    Size = UDim2.new(1, 0, 0, 1),
+    ZIndex = FloatFrame.ZIndex,
+})
+
+        -- Tab name label
+        local FloatTitleLabel = New("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(12, 0),
+            Size = UDim2.new(1, -120, 1, 0),
+            Text = TabName,
+            TextSize = 18,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = FloatFrame.ZIndex,
+            Parent = FloatTopBar,
+        })
+
+        -- "Dock" button in title bar
+local DockBtn = New("TextButton", {
+    AnchorPoint = Vector2.new(1, 0.5),
+    BackgroundColor3 = "MainColor",
+    Position = UDim2.new(1, -46, 0.5, 0),
+    Size = UDim2.fromOffset(52, 24),
+    Text = "Dock",
+    TextSize = 13,
+    ZIndex = FloatFrame.ZIndex + 1,
+    Parent = FloatTopBar,
+})
+        table.insert(Library.Corners, New("UICorner", {
+            CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+            Parent = DockBtn,
+        }))
+        Library:AddOutline(DockBtn)
+
+        -- Close button
+        local FloatCloseBtn = New("TextButton", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            BackgroundColor3 = "MainColor",
+            Position = UDim2.new(1, -8, 0.5, 0),
+            Size = UDim2.fromOffset(30, 24),
+Text = "−",
+TextColor3 = Library.Scheme.FontColor,
+            TextSize = 14,
+            ZIndex = FloatFrame.ZIndex + 1,
+            Parent = FloatTopBar,
+        })
+        table.insert(Library.Corners, New("UICorner", {
+            CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+            Parent = FloatCloseBtn,
+        }))
+        Library:AddOutline(FloatCloseBtn)
+local function SetupFloatButtonHover(Button)
+    Button.MouseEnter:Connect(function()
+        TweenService:Create(Button, Library.TweenInfo, {
+            BackgroundColor3 = Library.Scheme.BackgroundColor,
+        }):Play()
+    end)
+
+    Button.MouseLeave:Connect(function()
+        TweenService:Create(Button, Library.TweenInfo, {
+            BackgroundColor3 = Library.Scheme.MainColor,
+        }):Play()
+    end)
+end
+
+SetupFloatButtonHover(DockBtn)
+SetupFloatButtonHover(FloatCloseBtn)
+        -- Bottom bar (footer + resize)
+        local FloatBottomBg = New("Frame", {
+            AnchorPoint = Vector2.new(0, 1),
+            BackgroundColor3 = function()
+                return Library:GetBetterColor(Library.Scheme.BackgroundColor, 4)
+            end,
+            Position = UDim2.fromScale(0, 1),
+            Size = UDim2.new(1, 0, 0, 20 + Library.CornerRadius),
+            Parent = FloatFrame,
+        })
+        table.insert(Library.Corners, New("UICorner", {
+            CornerRadius = UDim.new(0, Library.CornerRadius),
+            Parent = FloatBottomBg,
+        }))
+        local FloatBottomLine = Library:MakeLine(FloatFrame, {
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.new(0, 0, 1, -20),
+            Size = UDim2.new(1, 0, 0, 1),
+        })
+
+        local FloatBottomBar = New("Frame", {
+            AnchorPoint = Vector2.new(0, 1),
+            BackgroundTransparency = 1,
+            Position = UDim2.fromScale(0, 1),
+            Size = UDim2.new(1, 0, 0, 20),
+            Parent = FloatFrame,
+        })
+
+        -- Floating window footer label
+        New("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+            Text = TabName .. " — Torn Off",
+            TextSize = 13,
+            TextTransparency = 0.5,
+            Parent = FloatBottomBar,
+        })
+
+        -- Resize handle
+        local FloatResizeBtn = New("TextButton", {
+            AnchorPoint = Vector2.new(1, 0),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(1, -Library.CornerRadius / 4, 0, 0),
+            Size = UDim2.fromScale(1, 1),
+            SizeConstraint = Enum.SizeConstraint.RelativeYY,
+            Text = "",
+            Parent = FloatBottomBar,
+        })
+        if ResizeIcon then
+            New("ImageLabel", {
+                Image = ResizeIcon.Url,
+                ImageColor3 = "FontColor",
+                ImageRectOffset = ResizeIcon.ImageRectOffset,
+                ImageRectSize = ResizeIcon.ImageRectSize,
+                ImageTransparency = 0.5,
+                Position = UDim2.fromOffset(2, 2),
+                Size = UDim2.new(1, -4, 1, -4),
+                Parent = FloatResizeBtn,
+            })
+        end
+        Library:MakeResizable(FloatFrame, FloatResizeBtn)
+
+        -- Move the tab's container into this float window
+        TabContainer.Parent = FloatFrame
+        TabContainer.Visible = true
+TabContainer.Position = UDim2.fromOffset(5, 49)
+TabContainer.Size = UDim2.new(1, -10, 1, -70)
+
+-- Make the torn-off window a valid groupbox drop target
+-- This lets groupboxes from other tabs be dragged into this torn-off tab.
+for _, Entry in Library.GroupboxDragTargets do
+    if Entry.TabName == TabName then
+        Entry.Button = FloatFrame
+        break
+    end
+end
+
+        -- Make it draggable (title bar drag)
+        Library:MakeDraggable(FloatFrame, FloatTopBar, true)
+
+        -- Track this torn-off tab
+        TornOffTabs[TabName] = {
+            Button = Button,
+            Tab = Tab,
+            TabContainer = TabContainer,
+            FloatGui = FloatGui,
+            FloatFrame = FloatFrame,
+        }
+
+        -- Dock button click
+DockBtn.MouseButton1Click:Connect(function()
+    DockTab(TabName)
+end)
+
+-- Minimize button
+local IsMinimized = false
+local NormalSize = FloatFrame.Size
+
+FloatCloseBtn.MouseButton1Click:Connect(function()
+    IsMinimized = not IsMinimized
+
+    if IsMinimized then
+        -- Capture the CURRENT size (which may have been resized by the user)
+        -- right before shrinking, so restoring uses the latest size, not the
+        -- size from when the tab was originally torn off.
+        NormalSize = FloatFrame.Size
+
+        FloatTitleLine.Visible = false
+        FloatBottomLine.Visible = false
+        TabContainer.Visible = false
+        FloatBottomBg.Visible = false
+        FloatBottomBar.Visible = false
+        FloatFrame.Size = UDim2.new(NormalSize.X.Scale, NormalSize.X.Offset, 0, 47)
+    else
+        FloatTitleLine.Visible = true
+        FloatBottomLine.Visible = true
+        TabContainer.Visible = true
+        FloatBottomBg.Visible = true
+        FloatBottomBar.Visible = true
+        FloatFrame.Size = NormalSize
+    end
+end)
+
+        -- Re-dock on title bar drag: on InputEnded check if over MainFrame
+        local IsTitleDragging = false
+        FloatTopBar.InputBegan:Connect(function(Input)
+            if IsMouseInput(Input) then
+                IsTitleDragging = true
+            end
         end)
 
-        return function() return IsDragging end
+        Library:GiveSignal(UserInputService.InputEnded:Connect(function(Input)
+            if Library.Unloaded then return end
+            if not IsTitleDragging then return end
+            if not IsMouseInput(Input) then return end
+
+            IsTitleDragging = false
+
+            -- Check if mouse is over the main window
+            local mPos = Vector2.new(Mouse.X, Mouse.Y)
+            if TornOffTabs[TabName] and Library:MouseIsOverFrame(MainFrame, mPos) then
+                DockTab(TabName)
+            end
+        end))
+
+        -- Show drop hint on main window when dragging float title bar over it
+        local DropHint = New("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = Library.Scheme.AccentColor,
+            BackgroundTransparency = 0.75,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromScale(1, 1),
+            Visible = false,
+            ZIndex = 900,
+            Parent = MainFrame,
+        })
+        table.insert(Library.Corners, New("UICorner", {
+            CornerRadius = UDim.new(0, Library.CornerRadius),
+            Parent = DropHint,
+        }))
+        New("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+            Text = "Drop to dock \"" .. TabName .. "\"",
+            TextColor3 = Library.Scheme.FontColor,
+            TextSize = 16,
+            ZIndex = 901,
+            Parent = DropHint,
+        })
+
+        Library:GiveSignal(UserInputService.InputChanged:Connect(function(Input)
+            if Library.Unloaded then return end
+            if not TornOffTabs[TabName] then
+                DropHint.Visible = false
+                return
+            end
+            if not IsTitleDragging then
+                DropHint.Visible = false
+                return
+            end
+            local mPos = Vector2.new(Mouse.X, Mouse.Y)
+            DropHint.Visible = Library:MouseIsOverFrame(MainFrame, mPos)
+        end))
+
+        -- Ensure hint is cleaned up when docked
+        local origDock = DockTab
+        -- (DropHint is parented to MainFrame so it goes away when FloatGui is destroyed,
+        --  but we also hide it explicitly on dock)
+        Library:GiveSignal(FloatGui.DescendantRemoving:Connect(function()
+            if DropHint and DropHint.Parent then
+                DropHint:Destroy()
+            end
+        end))
+
+        Library:AddToRegistry(FloatFrame, {
+            BackgroundColor3 = function()
+                return Library:GetBetterColor(Library.Scheme.BackgroundColor, -1)
+            end,
+        })
+        Library:AddToRegistry(FloatBottomBg, {
+            BackgroundColor3 = function()
+                return Library:GetBetterColor(Library.Scheme.BackgroundColor, 4)
+            end,
+        })
     end
-    
+
 local TabOrderCounter = 0
         local DraggingTab = nil
         local DraggingButton = nil
 
-        local function SetupTabDrag(Button)
-TabOrderCounter = TabOrderCounter + 1
-        Button.LayoutOrder = TabOrderCounter
-        Button.Name = "TabButton_" .. TabOrderCounter
+local function SetupTabDrag(Button)
+    TabOrderCounter = TabOrderCounter + 1
+    Button.LayoutOrder = TabOrderCounter
+    Button.Name = "TabButton_" .. TabOrderCounter
 
-            local DragStartY = nil
-            local IsDragging = false
-            local DragThreshold = 6
+    local DragStartY = nil
+    local IsDragging = false
+    local DragThreshold = 6
+    local ScrollThreshold = 8
+    local DragAllowed = false
+    local TouchHoldThread = nil
+    local TouchCancelled = false
+    local GhostClone = nil
+    local DropLine = nil
+    local TearOffLabel = nil  -- small floating label near cursor when outside
 
-            Button.InputBegan:Connect(function(Input)
-                if Input.UserInputType ~= Enum.UserInputType.MouseButton1
-                    and Input.UserInputType ~= Enum.UserInputType.Touch then
-                    return
-                end
-                DragStartY = Input.Position.Y
-                IsDragging = false
-            end)
+    local function CleanupDrag()
+        if GhostClone then
+            GhostClone:Destroy()
+            GhostClone = nil
+        end
+        if DropLine then
+            DropLine:Destroy()
+            DropLine = nil
+        end
+        if TearOffLabel then
+            TearOffLabel:Destroy()
+            TearOffLabel = nil
+        end
+        Button.BackgroundTransparency = 1
+    end
 
-           UserInputService.InputChanged:Connect(function(Input)
-                if (Input.UserInputType ~= Enum.UserInputType.MouseMovement
-                    and Input.UserInputType ~= Enum.UserInputType.Touch)
-                    or DragStartY == nil then
-                    return
-                end
+    local function CreateGhost()
+        GhostClone = New("Frame", {
+            BackgroundColor3 = Library.Scheme.MainColor,
+            Size = UDim2.fromOffset(Button.AbsoluteSize.X, Button.AbsoluteSize.Y),
+            Position = UDim2.fromOffset(Button.AbsolutePosition.X, Button.AbsolutePosition.Y),
+            ZIndex = 999,
+            Parent = ScreenGui,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(0, Library.CornerRadius),
+            Parent = GhostClone,
+        })
+        New("UIStroke", {
+            Color = Library.Scheme.AccentColor,
+            Thickness = 1,
+            Parent = GhostClone,
+        })
+        New("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.fromOffset(30, 0),
+            Size = UDim2.new(1, -30, 1, 0),
+            Text = Button:FindFirstChildWhichIsA("TextLabel") and Button:FindFirstChildWhichIsA("TextLabel").Text or "",
+            TextColor3 = Library.Scheme.FontColor,
+            TextSize = 16,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 1000,
+            Parent = GhostClone,
+        })
+        GhostClone.BackgroundTransparency = 0.3
+    end
 
-                if not IsDragging then
-                    if math.abs(Input.Position.Y - DragStartY) < DragThreshold then
-                        return
+    local function CreateDropLine(yPos)
+        if DropLine then
+            DropLine:Destroy()
+        end
+        DropLine = New("Frame", {
+            BackgroundColor3 = Library.Scheme.AccentColor,
+            Position = UDim2.fromOffset(Button.AbsolutePosition.X, yPos - 1),
+            Size = UDim2.fromOffset(Button.AbsoluteSize.X, 2),
+            ZIndex = 998,
+            Parent = ScreenGui,
+        })
+    end
+
+    -- Small pill label that follows cursor outside the window
+    local function ShowTearOffLabel(show, mouseX, mouseY)
+        if show then
+            local TabLabel = Button:FindFirstChildWhichIsA("TextLabel")
+            local TabName = TabLabel and TabLabel.Text or "Tab"
+            if not TearOffLabel then
+                TearOffLabel = New("Frame", {
+                    BackgroundColor3 = Library.Scheme.MainColor,
+                    Size = UDim2.fromOffset(180, 26),
+                    ZIndex = 1001,
+                    Parent = ScreenGui,
+                })
+                New("UICorner", {
+                    CornerRadius = UDim.new(0, Library.CornerRadius),
+                    Parent = TearOffLabel,
+                })
+                New("UIStroke", {
+                    Color = Library.Scheme.AccentColor,
+                    Thickness = 1,
+                    Parent = TearOffLabel,
+                })
+                New("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.fromScale(1, 1),
+                    Text = "🪟 Pop out \"" .. TabName .. "\"",
+                    TextColor3 = Library.Scheme.FontColor,
+                    TextSize = 13,
+                    ZIndex = 1002,
+                    Parent = TearOffLabel,
+                })
+            end
+            -- Follow cursor, offset so it doesn't cover the ghost
+            TearOffLabel.Position = UDim2.fromOffset(mouseX + 14, mouseY - 13)
+        else
+            if TearOffLabel then
+                TearOffLabel:Destroy()
+                TearOffLabel = nil
+            end
+        end
+    end
+
+    -- Walk Container's children to find which Frame contains this tab's sides
+    local function FindTabContainer(tab)
+        if not tab or not tab.Sides then return nil end
+        for _, child in ipairs(Container:GetChildren()) do
+            if child:IsA("Frame") or child:IsA("ScrollingFrame") then
+                for _, side in ipairs(tab.Sides) do
+                    if side.Parent == child then
+                        return child
                     end
-                    IsDragging = true
-                    DraggingButton = Button
                 end
+            end
+        end
+        return nil
+    end
 
-                local MouseY = Input.Position.Y
-                for _, OtherButton in Tabs:GetChildren() do
-                    if not OtherButton:IsA("TextButton") or OtherButton == Button then
-                        continue
-                    end
-                    local AbsY = OtherButton.AbsolutePosition.Y
-                    local AbsH = OtherButton.AbsoluteSize.Y
-                    if MouseY >= AbsY and MouseY <= AbsY + AbsH then
-                        local MyOrder = Button.LayoutOrder
-                        Button.LayoutOrder = OtherButton.LayoutOrder
-                        OtherButton.LayoutOrder = MyOrder
-                        break
-                    end
+    -- Match this button to its Library.Tabs entry by TextLabel text
+    local function FindTabForButton()
+        local lbl = Button:FindFirstChildWhichIsA("TextLabel")
+        if not lbl then return nil, nil end
+        local labelText = lbl.Text
+        for tabName, tab in pairs(Library.Tabs) do
+            if tabName == labelText then
+                return tabName, tab
+            end
+        end
+        return nil, nil
+    end
+
+    Button.InputBegan:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and Input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        DragStartY = Input.Position.Y
+        IsDragging = false
+
+        local IsTouch = (Input.UserInputType == Enum.UserInputType.Touch)
+
+        if Library.IsMobile or IsTouch then
+            DragAllowed = false
+            TouchCancelled = false
+
+            if TouchHoldThread then
+                task.cancel(TouchHoldThread)
+                TouchHoldThread = nil
+            end
+
+            -- Require finger to stay stationary for 3 seconds before drag/tear-off is armed
+            TouchHoldThread = task.delay(3, function()
+                if not TouchCancelled then
+                    DragAllowed = true
                 end
             end)
+        else
+            DragAllowed = true
+        end
+    end)
 
-            Button.InputEnded:Connect(function(Input)
-                if Input.UserInputType ~= Enum.UserInputType.MouseButton1
-                    and Input.UserInputType ~= Enum.UserInputType.Touch then
-                    return
-                end
-                if IsDragging then
-                    IsDragging = false
-                    DraggingButton = nil
-                    DragStartY = nil
-                    SaveTabOrder()
-                    return
-                end
-                DragStartY = nil
-            end)
+    UserInputService.InputChanged:Connect(function(Input)
+        if (Input.UserInputType ~= Enum.UserInputType.MouseMovement
+            and Input.UserInputType ~= Enum.UserInputType.Touch)
+            or DragStartY == nil then
+            return
         end
 
+        if not IsDragging then
+            local Distance = math.abs(Input.Position.Y - DragStartY)
+            local IsTouchLike = (Library.IsMobile or Input.UserInputType == Enum.UserInputType.Touch)
+
+            if IsTouchLike and not DragAllowed then
+                -- Still inside the hold window. If the finger is moving like a scroll,
+                -- cancel the hold so the ScrollingFrame gets the gesture instead.
+                if Distance > ScrollThreshold then
+                    TouchCancelled = true
+                    if TouchHoldThread then
+                        task.cancel(TouchHoldThread)
+                        TouchHoldThread = nil
+                    end
+                    DragStartY = nil
+                end
+                return
+            end
+
+            if Distance < DragThreshold then
+                return
+            end
+
+            IsDragging = true
+            DraggingButton = Button
+            Button.BackgroundTransparency = 0.7
+            CreateGhost()
+        end
+
+        if not IsDragging then return end
+
+        local MouseX = Input.Position.X
+        local MouseY = Input.Position.Y
+
+        -- Move ghost with cursor, but keep it inside the sidebar
+        if GhostClone then
+            local MinY = Tabs.AbsolutePosition.Y
+            local MaxY = Tabs.AbsolutePosition.Y + Tabs.AbsoluteSize.Y - Button.AbsoluteSize.Y
+            local GhostY = math.clamp(MouseY - Button.AbsoluteSize.Y / 2, MinY, math.max(MinY, MaxY))
+
+            GhostClone.Position = UDim2.fromOffset(
+                Button.AbsolutePosition.X,
+                GhostY
+            )
+        end
+
+        local mouseVec = Vector2.new(MouseX, MouseY)
+        local isOutside = not Library:MouseIsOverFrame(MainFrame, mouseVec)
+
+        if isOutside then
+            -- Hide drop line, show small tear-off label near cursor
+            if DropLine then
+                DropLine:Destroy()
+                DropLine = nil
+            end
+            ShowTearOffLabel(true, MouseX, MouseY)
+            return
+        end
+
+        -- Inside: hide tear-off label, show normal drop indicator
+        ShowTearOffLabel(false)
+
+        local OtherButtons = {}
+        for _, OtherButton in Tabs:GetChildren() do
+            if OtherButton:IsA("TextButton") and OtherButton ~= Button then
+                table.insert(OtherButtons, OtherButton)
+            end
+        end
+        table.sort(OtherButtons, function(a, b)
+            return a.LayoutOrder < b.LayoutOrder
+        end)
+
+        if #OtherButtons == 0 then return end
+
+        local TargetOrder = nil
+
+        if MouseY < OtherButtons[1].AbsolutePosition.Y + OtherButtons[1].AbsoluteSize.Y / 2 then
+            TargetOrder = OtherButtons[1].LayoutOrder - 1
+            CreateDropLine(OtherButtons[1].AbsolutePosition.Y)
+
+        elseif MouseY > OtherButtons[#OtherButtons].AbsolutePosition.Y + OtherButtons[#OtherButtons].AbsoluteSize.Y / 2 then
+            TargetOrder = OtherButtons[#OtherButtons].LayoutOrder + 1
+            CreateDropLine(OtherButtons[#OtherButtons].AbsolutePosition.Y + OtherButtons[#OtherButtons].AbsoluteSize.Y)
+
+        else
+            for i = 1, #OtherButtons - 1 do
+                local thisBtn = OtherButtons[i]
+                local nextBtn = OtherButtons[i + 1]
+                local thisMid = thisBtn.AbsolutePosition.Y + thisBtn.AbsoluteSize.Y / 2
+                local nextMid = nextBtn.AbsolutePosition.Y + nextBtn.AbsoluteSize.Y / 2
+
+                if MouseY >= thisMid and MouseY < nextMid then
+                    TargetOrder = thisBtn.LayoutOrder + 0.5
+                    CreateDropLine(nextBtn.AbsolutePosition.Y)
+                    break
+                end
+            end
+        end
+
+        if TargetOrder == nil then return end
+        Button.LayoutOrder = TargetOrder
+    end)
+    Button.InputEnded:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and Input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+
+        -- Always clear the hold-timer state on release, whether or not a drag happened
+        TouchCancelled = true
+        if TouchHoldThread then
+            task.cancel(TouchHoldThread)
+            TouchHoldThread = nil
+        end
+        DragAllowed = false
+
+        if IsDragging then
+            IsDragging = false
+            DraggingButton = nil
+
+            local mouseVec = Vector2.new(Mouse.X, Mouse.Y)
+            local isOutside = not Library:MouseIsOverFrame(MainFrame, mouseVec)
+
+            -- Capture final drag position before we reset
+            local finalDragY = DragStartY
+            DragStartY = nil
+
+            CleanupDrag()
+
+            if isOutside then
+                local tabName, tab = FindTabForButton()
+
+                if tabName and tab and not tab.IsKeyTab and not TornOffTabs[tabName] then
+                    local tabContainer = FindTabContainer(tab)
+                    if tabContainer then
+                        TearOffTab(Button, tab, tabName, tabContainer)
+                    end
+                end
+            else
+                -- Normal reorder inside window
+                local AllButtons = {}
+                for _, btn in Tabs:GetChildren() do
+                    if btn:IsA("TextButton") then
+                        table.insert(AllButtons, btn)
+                    end
+                end
+                table.sort(AllButtons, function(a, b)
+                    return a.LayoutOrder < b.LayoutOrder
+                end)
+                for i, btn in ipairs(AllButtons) do
+                    btn.LayoutOrder = i
+                end
+                SaveTabOrder()
+            end
+            return
+        end
+
+        DragStartY = nil
+        CleanupDrag()
+    end)
+end
 
 
     local function LoadTabOrder()
@@ -7168,8 +8081,7 @@ local SavedGroupboxOrder = LoadGroupboxOrder()
             Parent = BottomBar,
         })
 
-local LocalVersion = "1.0.6"
-
+local LocalVersion = tostring(_G.ScriptVersion or "v0.0.0"):gsub("^v", "")
 
         -- Status Circle
 local StatusCircle = New("Frame", {
@@ -7221,14 +8133,39 @@ UpdateButton.MouseButton1Click:Connect(function()
         return
     end
 
-    Library:Unload()
-    loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/544f64759db6021216af8ca483bb53c4.lua"))()
+    local remoteVersion = game:HttpGet("https://raw.githubusercontent.com/mg8308379-design/Obsidiantesting/refs/heads/main/Version.txt"):gsub("%s+", "")
+
+    local UpdateDialog = Window:AddDialog("UpdateDialog", {
+        Title = "Update",
+        Description = "Do you wish to update to UI version: " .. remoteVersion,
+        AutoDismiss = true,
+        OutsideClickDismiss = true,
+        FooterButtons = {
+            Cancel = {
+                Title = "Cancel",
+                Variant = "Ghost",
+                Order = 1,
+                Callback = function()
+                    -- just closes
+                end
+            },
+            Confirm = {
+                Title = "Confirm",
+                Variant = "Primary",
+                Order = 2,
+                Callback = function()
+                    Library:Unload()
+                    loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/7f4c9b056ecd55df7bd4721a04b217ff.lua"))()
+                end
+            }
+        }
+    })
 end)
 
 task.spawn(function()
     while not Library.Unloaded do
         local success, result = pcall(function()
-            return game:HttpGet("https://raw.githubusercontent.com/PollutedHub/Obsidianmodified/main/version.txt")
+            return game:HttpGet("https://raw.githubusercontent.com/mg8308379-design/Obsidiantesting/refs/heads/main/Version.txt")
         end)
 
         if success and result then
@@ -8473,6 +9410,8 @@ end)
         end)
         TabButton.MouseButton1Click:Connect(Tab.Show)
 
+
+
         Library.Tabs[Name] = Tab
 
         return Tab
@@ -9431,16 +10370,16 @@ end
     end))
 
 
-    
 
--- CHATBOX WINDOW_2.lua
--- CHATBOX WINDOW_2.lua
+
+-- start of chatbox
 do
         local ChatOpen = false
     local ChatMessages = {}
     local ReplyTarget = nil
     local NicknameTarget = nil
     local MuteDurationTarget = nil
+    local BanTarget = nil
     local ActiveMessageRows = {}
 local DeniedInviteIds = {}
     local MutedUsernamesMap = {}
@@ -10636,9 +11575,9 @@ end)
         BackgroundColor3 = Color3.fromRGB(50, 52, 58),
         Position = UDim2.new(1, -4, 0.5, 0),
         Size = UDim2.fromOffset(16, 16),
-        Text = "✕",
+        Text = "X",
         TextColor3 = Color3.fromRGB(255, 255, 255),
-        TextSize = 10,
+        TextSize = 11,
         ZIndex = 504,
         Parent = ReplyBanner,
     })
@@ -10725,16 +11664,23 @@ end)
         Parent = MentionScroll,
     })
 
-    local function PopulateMentionMenu(filterText)
+local function PopulateMentionMenu(filterText)
         for _, child in ipairs(MentionScroll:GetChildren()) do
             if child:IsA("GuiObject") then child:Destroy() end
         end
 
         local matches = {}
+        local filterLower = filterText:lower()
+        
+        -- Loop through users, but cap the search to prevent freezing if the table is massive
+        local maxResultsToFind = 30
         for user in pairs(SeenUsers) do
             local dName = GetDisplayName(user)
-            if user:lower():sub(1, #filterText) == filterText:lower() or dName:lower():sub(1, #filterText) == filterText:lower() then
+            if user:lower():sub(1, #filterText) == filterLower or dName:lower():sub(1, #filterText) == filterLower then
                 table.insert(matches, user)
+                if #matches >= maxResultsToFind then
+                    break -- Stop searching once we have enough matches to display
+                end
             end
         end
 
@@ -10805,7 +11751,7 @@ end)
                     local atIndex = reversed:find("@")
                     if atIndex then
                         local actualIndex = #text - atIndex + 1
-                        text = text:sub(1, actualIndex - 1) .. "@" .. user .. " "
+                        text = text:sub(1, actualIndex - 1) + "@" .. user .. " "
                         replaced = true
                     end
                 elseif text:match("^@([%w_]*)$") then
@@ -10827,7 +11773,6 @@ end)
 
         MentionMenu.Visible = true
     end
-
     local function UpdateMentionState()
         if not ChatInput.TextEditable then
             MentionMenu.Visible = false
@@ -10869,10 +11814,11 @@ end)
             MentionMenu.Position = UDim2.new(0, 8, 1, -50)
         end
 
-        if ReplyTarget then
-            ReplyBanner.Visible = true
-            ReplyBanner.Position = UDim2.new(0, 8, 0, 4)
-            ChatInput.PlaceholderText = "Message @" .. GetDisplayName(ReplyTarget.Username)
+if ReplyTarget then
+    ReplyBanner.Visible = true
+    ReplyBanner.Position = UDim2.new(0, 8, 0, 4)
+    ReplyBannerText.Text = "Replying to: " .. GetDisplayName(ReplyTarget.Username)
+    ChatInput.PlaceholderText = "Message @" .. GetDisplayName(ReplyTarget.Username)
         else
             ReplyBanner.Visible = false
         end
@@ -10894,13 +11840,16 @@ end)
             SendBtn.Active = true
             SendBtn.BackgroundColor3 = Library.Scheme.AccentColor
 
-            if NicknameTarget then
-                ChatInput.PlaceholderText = "Type nickname for " .. GetDisplayName(NicknameTarget) .. " here"
-                SendBtn.Text = "Set"
-            elseif MuteDurationTarget then
-                ChatInput.PlaceholderText = "Type time. Example : 1d 1h 1m 1s"
-                SendBtn.Text = "Mute"
-            else
+if NicknameTarget then
+    ChatInput.PlaceholderText = "Type nickname for " .. GetDisplayName(NicknameTarget) .. " here"
+    SendBtn.Text = "Set"
+elseif MuteDurationTarget then
+    ChatInput.PlaceholderText = "Type time. Example : 1d 1h 1m 1s"
+    SendBtn.Text = "Mute"
+elseif BanTarget then
+    ChatInput.PlaceholderText = "Type duration + reason. Example: 1d Spamming"
+    SendBtn.Text = "Ban"
+else
                 SendBtn.Text = "Send"
                 if not ReplyTarget then
                     ChatInput.PlaceholderText = "Send a message..."
@@ -10934,225 +11883,436 @@ end)
         end
     end
 
-    local function OpenUserContextMenu(targetUser, targetUserId)
-        CloseContextMenu()
 
-        local mousePos = game:GetService("UserInputService"):GetMouseLocation()
-        local isTargetMuted = MutedUsernamesMap[targetUser:lower()] or (targetUserId and MutedUsernamesMap[tostring(targetUserId):lower()])
-        local isAdminUser = IsAdmin(LocalPlayer.UserId, LocalPlayer.Name)
+-- Send Game Invite Request to VPS (Auto-waits for JobId)
+local function SendGameInviteToVPS(invitedUser)
+    if not HttpRequest or not invitedUser then return end
 
-        local optionCount = isAdminUser and 5 or 4
-        local menuHeight = (optionCount * 28) + ((optionCount - 1) * 2) + 12
+    task.spawn(function()
+        -- Wait up to 3 seconds for the JobId to load if it's currently empty
+        local startTime = tick()
+        while (not game.JobId or game.JobId == "") and (tick() - startTime < 3) do
+            task.wait(0.5)
+        end
 
-        ActiveContextMenu = New("Frame", {
-            BackgroundColor3 = Color3.fromRGB(18, 19, 22),
-            Position = UDim2.fromOffset(mousePos.X, mousePos.Y - 36),
-            Size = UDim2.fromOffset(160, menuHeight),
-            ZIndex = 800,
-            Parent = ScreenGui,
-        })
-        New("UICorner", { CornerRadius = UDim.new(0, 6), Parent = ActiveContextMenu })
-        New("UIStroke", { Color = Color3.fromRGB(45, 47, 52), Thickness = 1, Parent = ActiveContextMenu })
+        local currentJobId = game.JobId
+        if not currentJobId or currentJobId == "" then
+            Library:Notify({ Title = "Invite Failed", Description = "Server still loading. Try again.", Time = 2 })
+            return
+        end
 
-        New("UIListLayout", {
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Padding = UDim.new(0, 2),
-            Parent = ActiveContextMenu,
-        })
-        New("UIPadding", {
-            PaddingTop = UDim.new(0, 6),
-            PaddingBottom = UDim.new(0, 6),
-            PaddingLeft = UDim.new(0, 6),
-            PaddingRight = UDim.new(0, 6),
-            Parent = ActiveContextMenu,
-        })
-
-        local function CreateMenuOption(text, textColor, callback)
-            local btn = New("TextButton", {
-                BackgroundColor3 = Color3.fromRGB(18, 19, 22),
-                BackgroundTransparency = 0,
-                Size = UDim2.new(1, 0, 0, 28),
-                AutoButtonColor = false,
-                Text = text,
-                TextColor3 = textColor or Color3.fromRGB(185, 187, 190),
-                TextSize = 12,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                ZIndex = 801,
-                Parent = ActiveContextMenu,
+        local success, response = pcall(function()
+            return HttpRequest({
+                Url = "http://167.99.144.89:8081/chatbox",
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["Authorization"] = "Bearer " .. (_G.ChatboxSecretKey or "")
+                },
+                Body = game:GetService("HttpService"):JSONEncode({
+                    invitedUsername = invitedUser,
+                    username = game:GetService("Players").LocalPlayer.Name,
+                    placeid = tostring(game.PlaceId),
+                    jobid = tostring(currentJobId),
+                    players = #game:GetService("Players"):GetPlayers()
+                })
             })
-            New("UICorner", { CornerRadius = UDim.new(0, 4), Parent = btn })
-            New("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = btn })
+        end)
 
-            btn.MouseEnter:Connect(function()
-                btn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
-                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            end)
-            btn.MouseLeave:Connect(function()
-                btn.BackgroundColor3 = Color3.fromRGB(18, 19, 22)
-                btn.TextColor3 = textColor or Color3.fromRGB(185, 187, 190)
-            end)
-
-            btn.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.Touch or
-                   input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    CloseContextMenu()
-                    task.spawn(callback)
-                end
-            end)
-
-            btn.MouseButton1Down:Connect(function()
-                CloseContextMenu()
-                task.spawn(callback)
-            end)
+        if success then
+        else
         end
+    end)
+end
 
-        CreateMenuOption("Copy Username", nil, function()
-            if setclipboard then
-                setclipboard(targetUser)
-                Library:Notify({ Title = "Clipboard", Description = "Copied Username: " .. targetUser, Time = 2 })
-            end
-        end)
+local function OpenUserContextMenu(targetUser, targetUserId)
+    CloseContextMenu()
 
-        CreateMenuOption("Copy UserID", nil, function()
-            if setclipboard then
-                setclipboard(tostring(targetUserId or 0))
-                Library:Notify({ Title = "Clipboard", Description = "Copied UserID: " .. tostring(targetUserId or 0), Time = 2 })
-            end
-        end)
+    local mousePos = game:GetService("UserInputService"):GetMouseLocation()
+    local isTargetMuted = MutedUsernamesMap[targetUser:lower()] or (targetUserId and MutedUsernamesMap[tostring(targetUserId):lower()])
+    local isAdminUser = IsAdmin(LocalPlayer.UserId, LocalPlayer.Name)
 
-        CreateMenuOption("Set Nickname", nil, function()
-            NicknameTarget = targetUser
-            MuteDurationTarget = nil
-            ReplyTarget = nil
-            ChatInput.Text = ""
-            UpdateInputLayout()
-            ChatInput:CaptureFocus()
-        end)
+    -- Convert targetUserId to number if passed as a string from VPS
+    local numericUserId = tonumber(targetUserId)
 
-        CreateMenuOption("InviteUser", nil, function()
-            if not HttpRequest then return end
+    -- Primary Menu Frame
+    ActiveContextMenu = New("Frame", {
+        BackgroundColor3 = Color3.fromRGB(18, 19, 22),
+        Position = UDim2.fromOffset(mousePos.X, mousePos.Y - 36),
+        Size = UDim2.fromOffset(160, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        ZIndex = 800,
+        Parent = ScreenGui,
+    })
+    New("UICorner", { CornerRadius = UDim.new(0, 6), Parent = ActiveContextMenu })
+    New("UIStroke", { Color = Color3.fromRGB(45, 47, 52), Thickness = 1, Parent = ActiveContextMenu })
 
-            local Players = game:GetService("Players")
+    New("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2),
+        Parent = ActiveContextMenu,
+    })
+    New("UIPadding", {
+        PaddingTop = UDim.new(0, 6),
+        PaddingBottom = UDim.new(0, 6),
+        PaddingLeft = UDim.new(0, 6),
+        PaddingRight = UDim.new(0, 6),
+        Parent = ActiveContextMenu,
+    })
 
-            -- Check server capacity before sending the invite
-            local currentPlayers = Players.NumPlayers
-            local maxPlayers = Players.MaxPlayers
+    ------------------------------------------------------------------
+    -- Viewport Frame Side Menu
+    ------------------------------------------------------------------
+    local SidePreviewMenu = New("Frame", {
+        BackgroundColor3 = Color3.fromRGB(18, 19, 22),
+        Position = UDim2.new(1, 6, 0, 0),
+        Size = UDim2.fromOffset(140, 210),
+        ZIndex = 800,
+        Parent = ActiveContextMenu,
+    })
+    New("UICorner", { CornerRadius = UDim.new(0, 6), Parent = SidePreviewMenu })
+    New("UIStroke", { Color = Color3.fromRGB(45, 47, 52), Thickness = 1, Parent = SidePreviewMenu })
 
-            if currentPlayers >= maxPlayers then
-                -- Server is full, show a notification and stop execution
-                pcall(function()
-                    Library:Notify({
-                        Title = "Invite Failed",
-                        Description = "Reason: Server Full try again.",
-                        Time = 3
-                    })
-                end)
-                return
-            end
+    local ViewportContainer = New("Frame", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(4, 4),
+        Size = UDim2.new(1, -8, 1, -32),
+        ZIndex = 801,
+        Parent = SidePreviewMenu,
+    })
 
-            local HttpService = game:GetService("HttpService")
-            local localPlayer = Players.LocalPlayer
+    local Viewport = New("ViewportFrame", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, 0),
+        LightColor = Color3.fromRGB(255, 255, 255),
+        Ambient = Color3.fromRGB(180, 180, 180),
+        ZIndex = 801,
+        Parent = ViewportContainer,
+    })
 
-            local payload = {
-                invitedUsername = targetUser,       -- person you clicked InviteUser on
-                username = LocalPlayer.Name,        -- your username
-                placeid = tostring(game.PlaceId),   -- current PlaceId
-                jobid = game.JobId,                 -- current JobId
-                players = #Players:GetPlayers()     -- player count
-            }
+    -- Hide / Show Avatar Toggle Button (Minimizes Side Panel)
+    local isAvatarVisible = true
+    local ToggleAvatarBtn = New("TextButton", {
+        BackgroundColor3 = Color3.fromRGB(28, 29, 34),
+        Position = UDim2.new(0, 4, 1, -26),
+        Size = UDim2.new(1, -8, 0, 22),
+        AutoButtonColor = false,
+        Text = "Hide Avatar",
+        TextColor3 = Color3.fromRGB(185, 187, 190),
+        TextSize = 11,
+        ZIndex = 802,
+        Parent = SidePreviewMenu,
+    })
+    New("UICorner", { CornerRadius = UDim.new(0, 4), Parent = ToggleAvatarBtn })
+    New("UIStroke", { Color = Color3.fromRGB(45, 47, 52), Thickness = 1, Parent = ToggleAvatarBtn })
 
-            task.spawn(function()
-                pcall(function()
-                    HttpRequest({
-                        Url = "http://167.99.144.89:8081/chatbox",
-                        Method = "POST",
-                        Headers = {
-                            ["Content-Type"] = "application/json",
-                            ["Authorization"] = "Bearer " .. (_G.ChatboxSecretKey or "")
-                        },
-                        Body = HttpService:JSONEncode(payload)
-                    })
-                end)
-            end)
-        end)
+    ToggleAvatarBtn.MouseEnter:Connect(function()
+        ToggleAvatarBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+        ToggleAvatarBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end)
+    ToggleAvatarBtn.MouseLeave:Connect(function()
+        ToggleAvatarBtn.BackgroundColor3 = Color3.fromRGB(28, 29, 34)
+        ToggleAvatarBtn.TextColor3 = Color3.fromRGB(185, 187, 190)
+    end)
 
-        if isAdminUser then
-            if isTargetMuted then
-                CreateMenuOption("Unmute User", Color3.fromRGB(255, 60, 60), function()
-                    local commandText = ",unmute " .. targetUser
-                    local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-                    local resolvedUserId = targetUserId
-                    if not resolvedUserId then
-                        local success, fetchedId = pcall(function()
-                            return game:GetService("Players"):GetUserIdFromNameAsync(targetUser)
-                        end)
-                        resolvedUserId = success and fetchedId or 0
-                    end
+    -- Using Activated avoids triggering the global "click outside menu to close" listener
+    ToggleAvatarBtn.Activated:Connect(function()
+        isAvatarVisible = not isAvatarVisible
+        ViewportContainer.Visible = isAvatarVisible
 
-                    MutedUsernamesMap[targetUser:lower()] = nil
-                    if resolvedUserId then MutedUsernamesMap[tostring(resolvedUserId):lower()] = nil end
-                    for _, rowData in pairs(ActiveMessageRows) do
-                        if rowData.RefreshName then rowData.RefreshName() end
-                    end
-
-                    local payload = {
-                        Username = LocalPlayer.Name,
-                        UserId = tostring(LocalPlayer.UserId),
-                        Roles = {"user"},
-                        Message = commandText,
-                        MessageId = "cmd_" .. math.random(100000, 999999),
-                        Time = timestamp,
-                        MuteUser = targetUser,
-                        MuteDuration = "unmute",
-                        MuteUserId = tostring(resolvedUserId)
-                    }
-
-                    if HttpRequest then
-                        pcall(function()
-                            HttpRequest({
-                                Url = "http://167.99.144.89:8081/chatbox",
-                                Method = "POST",
-                                Headers = {
-                                    ["Content-Type"] = "application/json",
-                                    ["Authorization"] = "Bearer " .. (_G.ChatboxSecretKey or "")
-                                },
-                                Body = game:GetService("HttpService"):JSONEncode(payload),
-                            })
-                        end)
-                    end
-                    Window.ChatAddMessage("System", "Successfully executed: " .. commandText, true)
-                end)
-            else
-                CreateMenuOption("Mute User", Color3.fromRGB(255, 60, 60), function()
-                    MuteDurationTarget = targetUser
-                    NicknameTarget = nil
-                    ReplyTarget = nil
-                    ChatInput.Text = ""
-                    UpdateInputLayout()
-                    ChatInput:CaptureFocus()
-                end)
-            end
+        if isAvatarVisible then
+            SidePreviewMenu.Size = UDim2.fromOffset(140, 210)
+            ToggleAvatarBtn.Text = "Hide Avatar"
+        else
+            SidePreviewMenu.Size = UDim2.fromOffset(140, 30)
+            ToggleAvatarBtn.Text = "Show Avatar"
         end
+    end)
+
+    -- WorldModel wrapper for rendering
+    local WorldModel = Instance.new("WorldModel")
+    WorldModel.Parent = Viewport
+
+    -- Interactive Camera Setup
+    local cameraAngle = math.pi -- Face front
+    local cameraPitch = 0.3
+    local cameraZoom = 5.5
+    local isDragging = false
+    local lastMousePos = Vector2.zero
+
+    local vpCam = Instance.new("Camera")
+    Viewport.CurrentCamera = vpCam
+    vpCam.Parent = Viewport
+
+    local function UpdateCameraPosition(targetRoot)
+        if not targetRoot then return end
+
+        local rootCFrame = targetRoot.CFrame
+        local focusPosition = targetRoot.Position + Vector3.new(0, 0.5, 0)
+
+        local horizontalOffset = Vector3.new(
+            math.sin(cameraAngle) * math.cos(cameraPitch) * cameraZoom,
+            math.sin(cameraPitch) * cameraZoom,
+            math.cos(cameraAngle) * math.cos(cameraPitch) * cameraZoom
+        )
+
+        local cameraPos = focusPosition + rootCFrame:VectorToWorldSpace(horizontalOffset)
+        vpCam.CFrame = CFrame.new(cameraPos, focusPosition)
     end
 
+    -- Async Avatar Loading
+    task.spawn(function()
+        local Players = game:GetService("Players")
+        local charModel = nil
+        local resolvedId = numericUserId
+
+        -- Method 1: Workspace lookup
+        local inGamePlayer = Players:FindFirstChild(targetUser)
+        if inGamePlayer and inGamePlayer.Character then
+            inGamePlayer.Character.Archivable = true
+            charModel = inGamePlayer.Character:Clone()
+        end
+
+        -- Method 2: Fetch UserID if missing
+        if not resolvedId or resolvedId <= 0 then
+            pcall(function()
+                resolvedId = Players:GetUserIdFromNameAsync(targetUser)
+            end)
+        end
+
+        -- Method 3: Load avatar from UserID
+        if not charModel and resolvedId and resolvedId > 0 then
+            pcall(function()
+                charModel = Players:CreateHumanoidModelFromUserId(tonumber(resolvedId))
+            end)
+        end
+
+        if charModel and SidePreviewMenu.Parent then
+            charModel.Parent = WorldModel
+
+            local root = charModel:FindFirstChild("HumanoidRootPart")
+                or charModel:FindFirstChild("Torso")
+                or charModel:FindFirstChild("UpperTorso")
+                or charModel.PrimaryPart
+
+            if not root then
+                root = charModel:FindFirstChildWhichIsA("BasePart")
+            end
+
+            if root then
+                UpdateCameraPosition(root)
+
+                -- Drag & Zoom Handling
+                Viewport.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        isDragging = true
+                        lastMousePos = Vector2.new(input.Position.X, input.Position.Y)
+                    end
+                end)
+
+                game:GetService("UserInputService").InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        isDragging = false
+                    end
+                end)
+
+                game:GetService("UserInputService").InputChanged:Connect(function(input)
+                    if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                        local deltaX = input.Position.X - lastMousePos.X
+                        local deltaY = input.Position.Y - lastMousePos.Y
+                        lastMousePos = Vector2.new(input.Position.X, input.Position.Y)
+
+                        cameraAngle = cameraAngle - (deltaX * 0.02)
+                        cameraPitch = math.clamp(cameraPitch + (deltaY * 0.01), -1.2, 1.2)
+                        UpdateCameraPosition(root)
+                    elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+                        cameraZoom = math.clamp(cameraZoom - (input.Position.Z * 0.5), 3.0, 10.0)
+                        UpdateCameraPosition(root)
+                    end
+                end)
+            end
+        end
+    end)
+
+    ------------------------------------------------------------------
+    -- Context Options List
+    ------------------------------------------------------------------
+    local function CreateMenuOption(text, textColor, callback)
+        local btn = New("TextButton", {
+            BackgroundColor3 = Color3.fromRGB(18, 19, 22),
+            BackgroundTransparency = 0,
+            Size = UDim2.new(1, 0, 0, 28),
+            AutoButtonColor = false,
+            Text = text,
+            TextColor3 = textColor or Color3.fromRGB(185, 187, 190),
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 801,
+            Parent = ActiveContextMenu,
+        })
+        New("UICorner", { CornerRadius = UDim.new(0, 4), Parent = btn })
+        New("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = btn })
+
+        btn.MouseEnter:Connect(function()
+            btn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end)
+        btn.MouseLeave:Connect(function()
+            btn.BackgroundColor3 = Color3.fromRGB(18, 19, 22)
+            btn.TextColor3 = textColor or Color3.fromRGB(185, 187, 190)
+        end)
+
+        btn.Activated:Connect(function()
+            CloseContextMenu()
+            task.spawn(callback)
+        end)
+    end
+
+    CreateMenuOption("Copy Username", nil, function()
+        if setclipboard then
+            setclipboard(targetUser)
+            Library:Notify({ Title = "Clipboard", Description = "Copied Username: " .. targetUser, Time = 2 })
+        end
+    end)
+
+    CreateMenuOption("Copy UserID", nil, function()
+        if setclipboard then
+            local idToCopy = tostring(numericUserId or 0)
+            setclipboard(idToCopy)
+            Library:Notify({ Title = "Clipboard", Description = "Copied UserID: " .. idToCopy, Time = 2 })
+        end
+    end)
+
+    CreateMenuOption("Set Nickname", nil, function()
+        NicknameTarget = targetUser
+        MuteDurationTarget = nil
+        ReplyTarget = nil
+        ChatInput.Text = ""
+        UpdateInputLayout()
+        ChatInput:CaptureFocus()
+    end)
+
+-- Invite User (uses MouseButton1Down to avoid race with menu-close handler)
+local inviteBtn = New("TextButton", {
+    BackgroundColor3 = Color3.fromRGB(18, 19, 22),
+    BackgroundTransparency = 0,
+    Size = UDim2.new(1, 0, 0, 28),
+    AutoButtonColor = false,
+    Text = "Invite User",
+    TextColor3 = Color3.fromRGB(185, 187, 190),
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 801,
+    Parent = ActiveContextMenu,
+})
+New("UICorner", { CornerRadius = UDim.new(0, 4), Parent = inviteBtn })
+New("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = inviteBtn })
+
+inviteBtn.MouseEnter:Connect(function()
+    inviteBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+    inviteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+end)
+inviteBtn.MouseLeave:Connect(function()
+    inviteBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 22)
+    inviteBtn.TextColor3 = Color3.fromRGB(185, 187, 190)
+end)
+
+inviteBtn.MouseButton1Down:Connect(function()
+    CloseContextMenu()
+    task.spawn(function()
+        local Players = game:GetService("Players")
+        if #Players:GetPlayers() >= Players.MaxPlayers then
+            pcall(function()
+                Library:Notify({
+                    Title = "Invite Failed",
+                    Description = "Reason: Server Full try again.",
+                    Time = 3
+                })
+            end)
+            return
+        end
+        SendGameInviteToVPS(targetUser)
+    end)
+end)
+
+    if isAdminUser then
+        if isTargetMuted then
+            CreateMenuOption("Unmute User", Color3.fromRGB(255, 60, 60), function()
+                local commandText = ",unmute " .. targetUser
+                local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                local resolvedUserId = numericUserId
+
+                if not resolvedUserId then
+                    pcall(function()
+                        resolvedUserId = game:GetService("Players"):GetUserIdFromNameAsync(targetUser)
+                    end)
+                end
+
+                MutedUsernamesMap[targetUser:lower()] = nil
+                if resolvedUserId then MutedUsernamesMap[tostring(resolvedUserId):lower()] = nil end
+                for _, rowData in pairs(ActiveMessageRows) do
+                    if rowData.RefreshName then rowData.RefreshName() end
+                end
+
+                local payload = {
+                    Username = LocalPlayer.Name,
+                    UserId = tostring(LocalPlayer.UserId),
+                    Roles = {"user"},
+                    Message = commandText,
+                    MessageId = "cmd_" .. math.random(100000, 999999),
+                    Time = timestamp,
+                    MuteUser = targetUser,
+                    MuteDuration = "unmute",
+                    MuteUserId = tostring(resolvedUserId or 0)
+                }
+
+                if HttpRequest then
+                    pcall(function()
+                        HttpRequest({
+                            Url = "http://167.99.144.89:8081/chatbox",
+                            Method = "POST",
+                            Headers = {
+                                ["Content-Type"] = "application/json",
+                                ["Authorization"] = "Bearer " .. (_G.ChatboxSecretKey or "")
+                            },
+                            Body = game:GetService("HttpService"):JSONEncode(payload),
+                        })
+                    end)
+                end
+                Window.ChatAddMessage("System", "Successfully executed: " .. commandText, true)
+            end)
+        else
+            CreateMenuOption("Mute User", Color3.fromRGB(255, 60, 60), function()
+                MuteDurationTarget = targetUser
+                BanTarget = nil
+                NicknameTarget = nil
+                ReplyTarget = nil
+                ChatInput.Text = ""
+                UpdateInputLayout()
+                ChatInput:CaptureFocus()
+            end)
+
+            CreateMenuOption("Ban User", Color3.fromRGB(255, 60, 60), function()
+                BanTarget = targetUser
+                MuteDurationTarget = nil
+                NicknameTarget = nil
+                ReplyTarget = nil
+                ChatInput.Text = ""
+                UpdateInputLayout()
+                ChatInput:CaptureFocus()
+            end)
+        end
+    end
+end
 game:GetService("UserInputService").InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.MouseButton2 then
+        or input.UserInputType == Enum.UserInputType.MouseButton2
+        or input.UserInputType == Enum.UserInputType.Touch then
         if ActiveContextMenu then
-            local mousePos = game:GetService("UserInputService"):GetMouseLocation()
+            local p = Vector2.new(input.Position.X, input.Position.Y)
             local absPos = ActiveContextMenu.AbsolutePosition
             local absSize = ActiveContextMenu.AbsoluteSize
-            if not (mousePos.X >= absPos.X and mousePos.X <= absPos.X + absSize.X and mousePos.Y >= absPos.Y and mousePos.Y <= absPos.Y + absSize.Y) then
-                CloseContextMenu()
-            end
-        end
-    end
-    if input.UserInputType == Enum.UserInputType.Touch then
-        if ActiveContextMenu then
-            local mousePos = game:GetService("UserInputService"):GetMouseLocation()
-            local absPos = ActiveContextMenu.AbsolutePosition
-            local absSize = ActiveContextMenu.AbsoluteSize
-            if not (mousePos.X >= absPos.X and mousePos.X <= absPos.X + absSize.X and mousePos.Y >= absPos.Y and mousePos.Y <= absPos.Y + absSize.Y) then
+            if not (p.X >= absPos.X and p.X <= absPos.X + absSize.X and p.Y >= absPos.Y and p.Y <= absPos.Y + absSize.Y) then
                 CloseContextMenu()
             end
         end
@@ -11250,13 +12410,44 @@ end)
 
     local LastMessageTime = 0
     local SpamCooldown = 2
-local BannedWords = {"sex", "dick", "pussy", "nigger", "nigga", "fanny"}
-
+local BannedWords = {
+    "sex",
+    "dick",
+    "pussy",
+    "nigger",
+    "nigga",
+    "fanny",
+    "nig3a",
+    "nig3r",
+    "loadstring",
+    "https",
+    "pastefy",
+    "porn",
+    "fuck",
+    "fucking",
+    "niger",
+    "nga",
+    "niga",
+    "cock",
+    "shit",
+    "retard",
+    "retarded",
+    "/e speed",
+    "/speed",
+    "/",
+    "/spawn"
+}
 local function ContainsBannedWord(Msg)
+    if type(Msg) ~= "string" then return false end
+
     local Lower = Msg:lower()
+
     for _, Word in ipairs(BannedWords) do
-        if Lower:find(Word:lower(), 1, true) then return true end
+        if Lower:find(Word:lower(), 1, true) then
+            return true
+        end
     end
+
     return false
 end
 
@@ -11273,9 +12464,136 @@ end
         end
     end)
 
+local function FormatDiscordTime(isoTimeStr)
+    local dt
+
+    -- Parse ISO string if it exists
+    if type(isoTimeStr) == "string" and isoTimeStr ~= "" then
+        dt = DateTime.fromIsoDate(isoTimeStr)
+    end
+
+    -- If missing (local message), default to right now
+    if not dt then
+        dt = DateTime.now()
+    end
+
+    local msgDate = os.date("*t", dt.UnixTimestamp)
+    local nowDate = os.date("*t", os.time())
+
+    local msgStart = os.time({year = msgDate.year, month = msgDate.month, day = msgDate.day})
+    local nowStart = os.time({year = nowDate.year, month = nowDate.month, day = nowDate.day})
+    local diffDays = math.floor(os.difftime(nowStart, msgStart) / 86400)
+
+    local timeStr = string.format("%02d:%02d", msgDate.hour, msgDate.min)
+
+    if diffDays == 0 then
+        return "Today at " .. timeStr
+    elseif diffDays == 1 then
+        return "Yesterday at " .. timeStr
+    else
+        return string.format("%02d/%02d/%04d at %s", msgDate.day, msgDate.month, msgDate.year, timeStr)
+    end
+end
+
+local TranslateService = game:GetService("HttpService")
+
+local function translateToEnglish(text)
+    if not text or text == "" then return "" end
+
+    local encodedText = TranslateService:UrlEncode(text)
+
+    local function fetch(url)
+        for attempt = 1, 2 do
+            local ok, res = pcall(function()
+                if HttpRequest then
+                    local r = HttpRequest({ Url = url, Method = "GET" })
+                    if r and (r.StatusCode == nil or r.StatusCode == 200) then
+                        return r.Body
+                    end
+                    return nil
+                end
+                return game:HttpGet(url)
+            end)
+            if ok and res then return res end
+            task.wait(0.4)
+        end
+        return nil
+    end
+
+    -- Guess the source language from the script (only used for the MyMemory fallback)
+    local function guessLang(str)
+        for _, cp in utf8.codes(str, true) do
+            if cp >= 0x0400 and cp <= 0x04FF then return "ru" end
+            if cp >= 0x3040 and cp <= 0x30FF then return "ja" end
+            if cp >= 0xAC00 and cp <= 0xD7AF then return "ko" end
+            if cp >= 0x4E00 and cp <= 0x9FFF then return "zh-CN" end
+            if cp >= 0x0600 and cp <= 0x06FF then return "ar" end
+            if cp >= 0x0E00 and cp <= 0x0E7F then return "th" end
+            if cp >= 0x0590 and cp <= 0x05FF then return "he" end
+        end
+        return nil
+    end
+
+    -- API 1: Google Translate (auto-detect, any language)
+    local googleUrl = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=" .. encodedText
+    local body = fetch(googleUrl)
+    if body then
+        local ok, data = pcall(function() return TranslateService:JSONDecode(body) end)
+        if ok and type(data) == "table" and type(data[1]) == "table" then
+            local out = {}
+            for _, seg in ipairs(data[1]) do
+                if type(seg) == "table" and type(seg[1]) == "string" then
+                    table.insert(out, seg[1])
+                end
+            end
+            if #out > 0 then return table.concat(out) end
+        end
+    end
+
+    -- API 2: second Google endpoint (different rate limit)
+    local googleUrl2 = "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=en&q=" .. encodedText
+    local bodyB = fetch(googleUrl2)
+    if bodyB then
+        local ok, data = pcall(function() return TranslateService:JSONDecode(bodyB) end)
+        if ok and type(data) == "table" then
+            local first = data[1]
+            if type(first) == "table" and type(first[1]) == "string" then
+                return first[1]
+            elseif type(first) == "string" then
+                return first
+            end
+        end
+    end
+
+    -- API 3: MyMemory (needs a real source language, so only if we can guess one)
+    local lang = guessLang(text)
+    if lang then
+        local myMemoryUrl = "https://api.mymemory.translated.net/get?q=" .. encodedText .. "&langpair=" .. lang .. "|en"
+        local body2 = fetch(myMemoryUrl)
+        if body2 then
+            local ok, data = pcall(function() return TranslateService:JSONDecode(body2) end)
+            if ok and data and data.responseData and type(data.responseData.translatedText) == "string" then
+                local t = data.responseData.translatedText
+                if not t:upper():find("PLEASE SELECT") and not t:upper():find("INVALID") then
+                    return t
+                end
+            end
+        end
+    end
+
+    return text -- final fallback: show the original
+end
+
     local MsgIndex = 0
-    local function AddMessage(sender, text, isSystem, senderUserId, messageId, replyData, reactions, customSignature)
-        local msgIdStr = messageId or tostring(math.random(1000,9999))
+local function AddMessage(sender, text, isSystem, senderUserId, messageId, replyData, reactions, customSignature, msgTime)
+
+    -- Never render messages containing a banned word.
+    -- This also catches messages that existed before the word was added.
+    if not isSystem and ContainsBannedWord(text) then
+        return nil
+    end
+
+    local msgIdStr = messageId or tostring(math.random(1000,9999))
 
         if ActiveMessageRows[msgIdStr] then
             if ActiveMessageRows[msgIdStr].UpdateReactions then
@@ -11308,7 +12626,7 @@ end
 
         local btnWidth = isMobile and 44 or 28
         local barHeight = isMobile and 36 or 24
-        local barWidth = btnWidth * 3
+        local barWidth = btnWidth * 4
 
         local ActionBar = New("Frame", {
             AnchorPoint = Vector2.new(1, 0),
@@ -11348,6 +12666,17 @@ end
             Position = UDim2.new(0, btnWidth * 2, 0, 0),
             Size = UDim2.new(0, btnWidth, 1, 0),
             Text = "🗑️",
+            TextColor3 = Color3.fromRGB(200, 200, 200),
+            TextSize = isMobile and 14 or 11,
+            ZIndex = 511,
+            Parent = ActionBar,
+        })
+
+        local TranslateBtn = New("TextButton", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, btnWidth * 3, 0, 0),
+            Size = UDim2.new(0, btnWidth, 1, 0),
+            Text = "📻",
             TextColor3 = Color3.fromRGB(200, 200, 200),
             TextSize = isMobile and 14 or 11,
             ZIndex = 511,
@@ -11429,19 +12758,66 @@ end
             end
 
             local menuOpenedTick = tick()
-            activePickerMenu = New("Frame", {
-                BackgroundColor3 = Color3.fromRGB(35, 37, 42),
-                Position = UDim2.new(1, -140, 0, 28),
-                Size = UDim2.fromOffset(140, 34),
-                ZIndex = 600,
-                Parent = ActionBar,
-            })
-            New("UICorner", { CornerRadius = UDim.new(0, 6), Parent = activePickerMenu })
-            New("UIStroke", { Color = Color3.fromRGB(88, 101, 242), Parent = activePickerMenu })
-            New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = activePickerMenu })
-            New("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5), PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = activePickerMenu })
+activePickerMenu = New("ScrollingFrame", {
+    BackgroundColor3 = Color3.fromRGB(35, 37, 42),
+    Position = UDim2.fromOffset(
+        ChatGui.AbsolutePosition.X + ChatGui.AbsoluteSize.X + 8,
+        ChatGui.AbsolutePosition.Y
+    ),
+    Size = UDim2.fromOffset(240, 300),
 
-            local availableEmojis = {"👍", "❤️", "😂", "😮", "😢", "🔥"}
+    CanvasSize = UDim2.fromOffset(0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ScrollBarThickness = 6,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+
+    ZIndex = 600,
+    Parent = ScreenGui,
+})
+
+New("UICorner", {
+    CornerRadius = UDim.new(0, 6),
+    Parent = activePickerMenu
+})
+
+New("UIStroke", {
+    Color = Color3.fromRGB(88, 101, 242),
+    Parent = activePickerMenu
+})
+
+New("UIGridLayout", {
+    CellSize = UDim2.fromOffset(38, 38),
+    CellPadding = UDim2.fromOffset(4, 4),
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Parent = activePickerMenu
+})
+
+New("UIPadding", {
+    PaddingTop = UDim.new(0, 5),
+    PaddingBottom = UDim.new(0, 5),
+    PaddingLeft = UDim.new(0, 5),
+    PaddingRight = UDim.new(0, 5),
+    Parent = activePickerMenu
+})
+
+            local availableEmojis = {
+    "👍", "👎", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔",
+    "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", "🙂", "🙃",
+    "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚", "😋", "😛", "😝", "😜",
+    "🤪", "🤨", "🧐", "🤓", "😎", "🤩", "🥳", "😏", "😒", "😞", "😔", "😟",
+    "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠",
+    "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗",
+    "🤔", "🫡", "🤭", "🤫", "🤥", "😶", "😐", "😑", "😬", "🙄", "😯", "😦",
+    "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😵", "🤐", "🥴", "🤢", "🤮",
+    "🤧", "😷", "🤒", "🤕",
+    "👋", "🤚", "🖐️", "✋", "🖖", "👌", "🤌", "🤏", "✌️", "🤞", "🫰", "🤟",
+    "🤘", "🤙", "👈", "👉", "👆", "👇", "☝️", "✊", "👊", "🤛", "🤜", "👏",
+    "🙌", "👐", "🤲", "🙏", "💪",
+    "🔥", "💯", "⭐", "🌟", "✨", "💥", "🎉", "🎊", "💎", "👑", "🏆", "🎯",
+    "🚀", "💫", "⚡", "☀️", "🌙", "🌈",
+    "🍕", "🍔", "🍟", "🌭", "🍿", "🍩", "🍪", "🍰", "🎂", "🍺", "☕", "❤️‍🔥"
+}
             for _, emoji in ipairs(availableEmojis) do
                 local emojiBtn = New("TextButton", {
                     BackgroundTransparency = 1,
@@ -11638,6 +13014,21 @@ end)
             return nick
         end
 
+local HeaderContainer = New("Frame", {
+    BackgroundTransparency = 1,
+    AutomaticSize = Enum.AutomaticSize.XY,
+    Size = UDim2.new(1, 0, 0, 0),
+    ZIndex = 504,
+    Parent = ContentLayout,
+})
+New("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Padding = UDim.new(0, 6),
+    VerticalAlignment = Enum.VerticalAlignment.Bottom,
+    Parent = HeaderContainer,
+})
+
 local NameBtn = New("TextButton", {
     AutomaticSize = Enum.AutomaticSize.XY,
     BackgroundTransparency = 1,
@@ -11645,9 +13036,25 @@ local NameBtn = New("TextButton", {
     TextColor3 = GetNameColor(),
     TextSize = 13,
     TextXAlignment = Enum.TextXAlignment.Left,
+    LayoutOrder = 1,
     ZIndex = 504,
-    Parent = ContentLayout,
+    Parent = HeaderContainer,
 })
+
+local TimeText = FormatDiscordTime(msgTime)
+if TimeText ~= "" then
+    New("TextLabel", {
+        AutomaticSize = Enum.AutomaticSize.XY,
+        BackgroundTransparency = 1,
+        Text = TimeText,
+        TextColor3 = Color3.fromRGB(150, 150, 150),
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = 2,
+        ZIndex = 504,
+        Parent = HeaderContainer,
+    })
+end
 
 NameBtn.MouseButton2Click:Connect(function()
     if not isSystem then OpenUserContextMenu(sender, senderUserId) end
@@ -11712,6 +13119,51 @@ end)
             Parent = ContentLayout,
         })
         table.insert(MessageBodyLabels, MsgBodyLabel)
+        -- 📻 Translate (local only, only changes YOUR screen)
+        local originalText = text
+        local translatedText = nil
+        local showingTranslation = false
+        local isTranslating = false
+
+        TranslateBtn.MouseButton1Click:Connect(function()
+            if isTranslating then return end
+
+            -- Toggle back to the original
+            if showingTranslation then
+                showingTranslation = false
+                MsgBodyLabel.Text = originalText
+                TranslateBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+                return
+            end
+
+            -- Use the cached translation if we already have it
+            if translatedText then
+                showingTranslation = true
+                MsgBodyLabel.Text = translatedText
+                TranslateBtn.TextColor3 = Color3.fromRGB(88, 101, 242)
+                return
+            end
+
+            isTranslating = true
+            MsgBodyLabel.Text = "Translating..."
+            task.spawn(function()
+                local result = translateToEnglish(originalText)
+                translatedText = result
+                isTranslating = false
+                if MsgBodyLabel and MsgBodyLabel.Parent then
+                    showingTranslation = true
+                    MsgBodyLabel.Text = translatedText
+                    TranslateBtn.TextColor3 = Color3.fromRGB(88, 101, 242)
+                end
+            end)
+        end)
+
+        -- Mobile: stop the row tap handler from toggling the bar when you press this button
+        TranslateBtn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch then
+                touchStartedOnButton = true
+            end
+        end)
 
         local reactionContainer = New("Frame", {
             AutomaticSize = Enum.AutomaticSize.XY,
@@ -11779,6 +13231,9 @@ end)
         RenderReactions(currentRowReactions)
 
         ActiveMessageRows[msgIdStr] = {
+
+                Row = Row,
+    Text = tostring(text),
             SetHighlight = SetRowHighlight,
             HideActionBar = function()
                 actionBarShown = false
@@ -11857,7 +13312,57 @@ end)
             UpdateInputLayout()
             return
         end
+        if BanTarget then
+            local input = ChatInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
 
+            if input == "" then
+                return
+            end
+
+            -- First word = duration, everything after = reason
+            local duration, reason = input:match("^(%S+)%s+(.+)$")
+
+            if not duration or not reason then
+                return
+            end
+
+            local payload = {
+                Username = LocalPlayer.Name,
+                UserId = tostring(LocalPlayer.UserId),
+                Roles = {"user"},
+                Message = reason,
+                MessageId = "ban_" .. math.random(100000, 999999),
+                Time = os.time(),
+
+                BanUsername = BanTarget,
+                BanDuration = duration,
+                BanReason = reason,
+                BanUser = BanTarget
+            }
+
+            if HttpRequest then
+                task.spawn(function()
+                    pcall(function()
+                        HttpRequest({
+                            Url = "http://167.99.144.89:8081/chatbox",
+                            Method = "POST",
+                            Headers = {
+                                ["Content-Type"] = "application/json",
+                                ["Authorization"] = "Bearer " .. (_G.ChatboxSecretKey or "")
+                            },
+                            Body = game:GetService("HttpService"):JSONEncode(payload)
+                        })
+                    end)
+                end)
+            else
+                return
+            end
+
+            BanTarget = nil
+            ChatInput.Text = ""
+            UpdateInputLayout()
+            return
+        end
         local Msg = ChatInput.Text
         if not Msg or Msg:gsub("%s", "") == "" then return end
 
@@ -11898,7 +13403,7 @@ end)
             end
         end
 
-        if #Msg > 100 then AddMessage("System", "Message too long.", true); return end
+        if #Msg > 500 then AddMessage("System", "Message too long max 500 char.", true); return end
 if tick() - LastMessageTime < SpamCooldown then AddMessage("System", "Slow down.", true); return end
 if ContainsBannedWord(Msg) then AddMessage("System", "Your message contains a blocked word.", true); return end
 
@@ -11933,6 +13438,17 @@ if ContainsBannedWord(Msg) then AddMessage("System", "Your message contains a bl
     end
 
 local function FetchMessages()
+
+        -- Remove already-rendered messages that are now banned.
+    for msgId, rowData in pairs(ActiveMessageRows) do
+        if rowData.Text and ContainsBannedWord(rowData.Text) then
+            if rowData.Row and rowData.Row.Parent then
+                rowData.Row:Destroy()
+            end
+
+            ActiveMessageRows[msgId] = nil
+        end
+    end
         pcall(function()
             if HttpRequest then
                 local Result = HttpRequest({
@@ -12070,7 +13586,7 @@ end
                             for _, msgData in ipairs(messageList) do
                                 if msgData.Username and msgData.Message then
                                     local replyData = msgData.ReplyToId and { Id = msgData.ReplyToId, Username = msgData.ReplyToUser, Text = msgData.ReplyToText } or nil
-                                    AddMessage(msgData.Username, msgData.Message, false, msgData.UserId, msgData.MessageId, replyData, msgData.Reactions)
+                                    AddMessage(msgData.Username, msgData.Message, false, msgData.UserId, msgData.MessageId, replyData, msgData.Reactions, nil, msgData.Time)
                                 end
                             end
                         end
@@ -12183,8 +13699,106 @@ ChatTabButton.MouseButton1Click:Connect(function()
     end
 end)
     Window.ChatAddMessage = AddMessage
-end
 
+
+    -- Automatic local-player ban checker
+task.spawn(function()
+    local HttpService = game:GetService("HttpService")
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+
+    while true do
+        task.wait(2)
+
+        if not HttpRequest or not LocalPlayer then
+            continue
+        end
+
+        local success, response = pcall(function()
+            return HttpRequest({
+                Url = "http://167.99.144.89:8081/chatbox/bancheck?username="
+                    .. HttpService:UrlEncode(LocalPlayer.Name),
+
+                Method = "GET",
+
+                Headers = {
+                    ["Authorization"] =
+                        "Bearer " .. (_G.ChatboxSecretKey or "")
+                }
+            })
+        end)
+
+        if not success then
+            continue
+        end
+
+        if not response then
+            continue
+        end
+
+        local body = response.Body or response.body
+
+        if not body then
+            continue
+        end
+
+
+        local decodedSuccess, data = pcall(function()
+            return HttpService:JSONDecode(body)
+        end)
+
+        if not decodedSuccess then
+            continue
+        end
+
+        if type(data) ~= "table" then
+            continue
+        end
+
+
+        if data.banned == true then
+            local reason = tostring(data.reason or "No reason specified")
+
+            local banTime
+
+            if data.permanent == true then
+                banTime = "Permanent"
+            elseif data.remainingSeconds ~= nil then
+                banTime = FormatDuration(
+                    tonumber(data.remainingSeconds) or 0
+                )
+            else
+                banTime = tostring(data.length or "Unknown")
+            end
+
+            local kickMessage =
+                "You are banned.\n\n"
+                .. "Reason: " .. reason
+                .. "\nTime remaining: " .. banTime
+
+
+            -- Kick immediately
+            pcall(function()
+                LocalPlayer:Kick(kickMessage)
+            end)
+
+            -- Wait 3 seconds after the kick
+            task.wait(3)
+
+            -- Shut down the current client session
+
+            pcall(function()
+                game:Shutdown()
+            end)
+
+            -- Stop polling
+            break
+        end
+    end
+end)
+
+
+end
 
 
 ------ end of chatbox
@@ -12192,6 +13806,7 @@ end
     --testing388811111
     return Window
 end
+
 
 
 
